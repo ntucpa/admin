@@ -51,23 +51,38 @@
     fetch(API_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ action: 'admin.ping' }) }).then(null, function () {});
   }
 
-  /** 呼叫後端 AdminApi；回傳 Promise<data>，失敗時 reject {code, message} */
-  function api(name, args) {
-    var t0 = Date.now();
+  /** 只讀取、不寫入的動作：遇到 Google 連線錯誤時可安全地自動重試 */
+  var READ_ONLY = { ping: 1, loginUrl: 1, getHome: 1, getSettings: 1, listCompanies: 1, getUnclassifiedFolder: 1, listAdmins: 1, checkEmail: 1 };
+  var NET_ERR = 'Google 連線暫時不穩，請稍後再試一次。若是儲存或新增，請先重新整理頁面確認是否已完成，避免重複操作。';
+
+  function once(name, args, t0) {
     return fetch(API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({ action: 'admin.' + name, token: token, args: args || {} })
     }).then(function (r) {
-      if (!r.ok) throw { code: 'NETWORK', message: '連線失敗（' + r.status + '），請稍後再試' };
-      return r.json();
+      if (!r.ok) throw { code: 'NETWORK', message: NET_ERR };
+      return r.json().then(null, function () { throw { code: 'NETWORK', message: NET_ERR }; });
     }, function () {
-      throw { code: 'NETWORK', message: '連線失敗，請檢查網路後重試' };
+      throw { code: 'NETWORK', message: NET_ERR };
     }).then(function (r) {
       $('perf').textContent = '最近一次操作：伺服器處理 ' + ((r.ms || 0) / 1000).toFixed(1) + ' 秒｜總耗時 ' + ((Date.now() - t0) / 1000).toFixed(1) + ' 秒';
       if (r.ok) return r.data;
       throw r.error || { code: 'INTERNAL', message: '系統發生錯誤' };
     });
+  }
+
+  /** 呼叫後端 AdminApi；回傳 Promise<data>，失敗時 reject {code, message}。讀取類動作遇連線錯誤自動重試 2 次 */
+  function api(name, args) {
+    var t0 = Date.now();
+    var tries = READ_ONLY[name] ? 3 : 1;
+    function attempt(n) {
+      return once(name, args, t0).then(null, function (err) {
+        if (err.code === 'NETWORK' && n < tries) return attempt(n + 1);
+        throw err;
+      });
+    }
+    return attempt(1);
   }
 
   /** api 的簡便版：失敗時自動處理登入逾時，其他錯誤交給 onErr 或跳出提示 */
