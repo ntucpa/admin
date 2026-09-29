@@ -55,6 +55,10 @@
     .checks label { display:flex; gap:6px; align-items:flex-start; font-weight:400; font-size:13px; margin:4px 0; color:#1f2d3d; }
     .actions { display:flex; justify-content:flex-end; gap:8px; margin-top:16px; }
     .big { font-size:22px; font-weight:700; color:var(--navy); text-align:center; padding:14px; background:#f4f6f8; border-radius:8px; word-break:break-all; }
+    #busy { position:fixed; inset:0; background:rgba(244,246,248,.92); display:flex; flex-direction:column; align-items:center; justify-content:center; z-index:20; gap:14px; font-size:16px; color:var(--navy); }
+    #busy .spin { width:42px; height:42px; border:4px solid #dde3ea; border-top-color:var(--navy); border-radius:50%; animation:spin 1s linear infinite; }
+    #busy .sub { font-size:13px; color:#667085; max-width:320px; text-align:center; }
+    @keyframes spin { to { transform:rotate(360deg); } }
     footer { color:#98a2b3; font-size:11px; padding:8px 24px; }
     @media (max-width:760px) { nav { display:none; } main { padding:16px; } }
   </style>
@@ -134,6 +138,8 @@
       </main>
     </div>
   </div>
+
+  <div id="busy" class="hidden"><div class="spin"></div><div id="busyText">處理中…</div><div class="sub" id="busySub"></div></div>
 
   <div id="overlay" class="overlay hidden"><div class="modal" id="modal"></div></div>
 

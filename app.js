@@ -33,6 +33,24 @@
   }
   function cleanUrl() { history.replaceState({}, '', location.pathname); }
 
+  /** 全畫面等待提示；超過 8 秒補充說明，避免誤以為當機 */
+  var busyTimer = null;
+  function showBusy(text) {
+    $('busyText').textContent = text || '處理中…';
+    $('busySub').textContent = '';
+    $('busy').classList.remove('hidden');
+    clearTimeout(busyTimer);
+    busyTimer = setTimeout(function () {
+      $('busySub').textContent = '系統回應較慢，請稍候，不要關閉或重新整理頁面。（系統更新後的第一次操作可能需要 20～30 秒）';
+    }, 8000);
+  }
+  function hideBusy() { clearTimeout(busyTimer); $('busy').classList.add('hidden'); }
+
+  /** 暖機：預先喚醒後端，縮短接下來真正操作的等待時間 */
+  function warmUp() {
+    fetch(API_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ action: 'admin.ping' }) }).then(null, function () {});
+  }
+
   /** 呼叫後端 AdminApi；回傳 Promise<data>，失敗時 reject {code, message} */
   function api(name, args) {
     var t0 = Date.now();
@@ -101,12 +119,14 @@
     $('loginError').textContent = message || '';
     $('loginNotice').classList.toggle('hidden', !notice);
     $('loginNotice').textContent = notice || '';
+    warmUp();
   }
 
   $('loginBtn').onclick = function () {
     var btn = $('loginBtn'); btn.disabled = true;
+    showBusy('正在前往 LINE 登入…');
     api('loginUrl', loginPurpose).then(function (url) { location.href = url; }, function (err) {
-      btn.disabled = false; showLogin(err.message);
+      hideBusy(); btn.disabled = false; showLogin(err.message);
     });
   };
 
@@ -552,8 +572,9 @@
   $('overlay').onclick = function (e) { if (e.target === $('overlay')) closeModal(); };
 
   function enter(notice) {
-    call('getHome', {}, function (home) { showApp(home); if (notice) alert(notice); },
-      function (err) { showLogin(err.message, notice); });
+    showBusy('載入中…');
+    call('getHome', {}, function (home) { hideBusy(); showApp(home); if (notice) alert(notice); },
+      function (err) { hideBusy(); showLogin(err.message, notice); });
   }
 
   (function start() {
@@ -561,13 +582,16 @@
     if (params.get('code') || params.get('error')) {
       var args = { code: params.get('code') || '', state: params.get('state') || '', error: params.get('error') || '' };
       cleanUrl();
-      $('loginView').classList.remove('hidden');
-      $('loginSub').textContent = '登入中…';
+      showBusy('登入中，請稍候…');
       api('callback', args).then(function (r) {
-        $('loginSub').textContent = '管理後台';
-        if (r.sessionToken) { token = r.sessionToken; store(TOKEN_KEY, token); return enter(r.notice); }
+        hideBusy();
+        if (r.sessionToken) {
+          token = r.sessionToken; store(TOKEN_KEY, token);
+          if (r.home) { showApp(r.home); if (r.notice) alert(r.notice); return; }
+          return enter(r.notice);
+        }
         showLogin(r.error || '', r.notice || '');
-      }, function (err) { $('loginSub').textContent = '管理後台'; showLogin(err.message); });
+      }, function (err) { hideBusy(); showLogin(err.message); });
       return;
     }
     if (params.get('invite')) { loginPurpose = { invite: params.get('invite') }; cleanUrl(); return showPurposePrompt('invite'); }
