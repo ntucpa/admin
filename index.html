@@ -60,7 +60,23 @@
     #busy .sub { font-size:13px; color:#667085; max-width:320px; text-align:center; }
     @keyframes spin { to { transform:rotate(360deg); } }
     footer { color:#98a2b3; font-size:11px; padding:8px 24px; }
-    @media (max-width:760px) { nav { display:none; } main { padding:16px; } }
+    #menuBtn { display:none; background:transparent; border:0; color:#fff; font-size:22px; padding:0 6px 0 0; cursor:pointer; }
+    #navMask { display:none; }
+    .linkbtn { background:none; border:0; color:var(--navy); text-decoration:underline; cursor:pointer; font:inherit; font-size:12px; padding:0; }
+    @media (max-width:760px) {
+      #menuBtn { display:inline-block; }
+      header { padding:10px 12px; gap:10px; }
+      header .brand { font-size:15px; }
+      header .who { display:none; }
+      nav { position:fixed; top:0; left:0; bottom:0; width:240px; z-index:15; transform:translateX(-100%); transition:transform .2s; box-shadow:2px 0 12px rgba(0,0,0,.15); overflow-y:auto; }
+      nav.open { transform:none; }
+      #navMask.open { display:block; position:fixed; inset:0; background:rgba(15,23,42,.35); z-index:14; }
+      main { padding:14px 12px; }
+      .card { padding:12px; overflow-x:auto; }
+      table { min-width:620px; }
+      .grid { grid-template-columns:1fr; }
+      h1 { font-size:18px; flex-wrap:wrap; }
+    }
   </style>
 </head>
 <body>
@@ -77,12 +93,14 @@
 
   <div id="appView" class="hidden">
     <header>
+      <button id="menuBtn" aria-label="選單">☰</button>
       <span class="brand">永承事務所管理系統｜管理後台</span>
       <span class="spacer"></span>
       <span class="who" id="who"></span>
       <button id="logoutBtn">登出</button>
     </header>
     <div class="layout">
+      <div id="navMask"></div>
       <nav id="nav">
         <a data-page="home" class="active">首頁</a>
         <div class="sec">業務</div>
@@ -143,7 +161,7 @@
 
   <div id="overlay" class="overlay hidden"><div class="modal" id="modal"></div></div>
 
-  <script src="config.js"></script>
-  <script src="app.js"></script>
+  <script src="config.js?v=0.4.5"></script>
+  <script src="app.js?v=0.4.5"></script>
 </body>
 </html>

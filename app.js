@@ -303,13 +303,21 @@
     return box;
   }
 
+  var showSuspended = false;
+
   function renderAdmins(d) {
     var box = $('adminBox'); box.innerHTML = '';
+    var suspended = d.admins.filter(function (a) { return a.status === 'SUSPENDED'; }).length;
+    if (suspended) {
+      var tg = el('button', { class: 'linkbtn', style: 'margin-bottom:8px' }, showSuspended ? '隱藏已停用的管理員' : '顯示已停用的管理員（' + suspended + '）');
+      tg.onclick = function () { showSuspended = !showSuspended; renderAdmins(d); };
+      box.appendChild(tg);
+    }
     var names = {}; d.companies.forEach(function (c) { names[c.companyId] = c.name; });
     var t = el('table');
     var cg = el('colgroup'); ['170px', '', '', '120px', '130px'].forEach(function (w) { cg.appendChild(el('col', w ? { style: 'width:' + w } : {})); }); t.appendChild(cg);
     var h = el('tr'); ['姓名／角色', 'Google 帳號', '負責公司', '雲端權限', '操作'].forEach(function (x) { h.appendChild(el('th', {}, x)); }); t.appendChild(h);
-    d.admins.forEach(function (a) {
+    d.admins.filter(function (a) { return showSuspended || a.status !== 'SUSPENDED'; }).forEach(function (a) {
       var tr = el('tr');
       var c1 = el('td'); c1.appendChild(el('div', { style: 'font-weight:600' }, a.name));
       c1.appendChild(badge(a.role === 'SUPER_ADMIN' ? '超級管理員' : '管理員'));
@@ -584,7 +592,10 @@
   $('logoutBtn').onclick = function () {
     api('logout', {}).then(null, function () {}).then(function () { showLogin('', '您已登出。'); });
   };
-  document.querySelectorAll('nav a[data-page]').forEach(function (a) { a.onclick = function () { go(a.getAttribute('data-page')); }; });
+  function closeMenu() { $('nav').classList.remove('open'); $('navMask').classList.remove('open'); }
+  $('menuBtn').onclick = function () { $('nav').classList.add('open'); $('navMask').classList.add('open'); };
+  $('navMask').onclick = closeMenu;
+  document.querySelectorAll('nav a[data-page]').forEach(function (a) { a.onclick = function () { closeMenu(); go(a.getAttribute('data-page')); }; });
   $('overlay').onclick = function (e) { if (e.target === $('overlay')) closeModal(); };
 
   function enter(notice) {
