@@ -53,7 +53,7 @@
   }
 
   /** 只讀取、不寫入的動作：遇到 Google 連線錯誤時可安全地自動重試 */
-  var READ_ONLY = { ping: 1, loginUrl: 1, getHome: 1, getSettings: 1, listCompanies: 1, getUnclassifiedFolder: 1, listAdmins: 1, checkEmail: 1 };
+  var READ_ONLY = { ping: 1, loginUrl: 1, getHome: 1, getSettings: 1, listCompanies: 1, getUnclassifiedFolder: 1, listAdmins: 1, checkEmail: 1, listBindings: 1, listCustomers: 1, customerHistory: 1, listInvites: 1 };
   var NET_ERR = 'Google 連線暫時不穩，請稍後再試一次。若是儲存或新增，請先重新整理頁面確認是否已完成，避免重複操作。';
 
   function once(name, args, t0) {
@@ -165,11 +165,26 @@
     $('appView').classList.remove('hidden');
     $('who').textContent = me.name + '（' + (me.role === 'SUPER_ADMIN' ? '超級管理員' : '管理員') + '）';
     document.querySelectorAll('.super-only').forEach(function (n) { n.classList.toggle('hidden', me.role !== 'SUPER_ADMIN'); });
+    document.querySelectorAll('nav a[data-feature]').forEach(function (n) { n.classList.toggle('hidden', (me.features || []).indexOf(n.getAttribute('data-feature')) < 0); });
     renderHome(home);
   }
 
   /* ---------- 首頁 ---------- */
   function renderHome(home) {
+    var pend = home.pendingBindings;
+    $('statPending').classList.toggle('hidden', pend === null || pend === undefined);
+    $('statPendingValue').textContent = pend || 0;
+    $('statPendingValue').className = 'value' + (pend ? ' warn' : '');
+    setNavPending(pend);
+    var rn = home.runner;
+    if (rn) {
+      var pct = rn.budgetMinutes ? Math.round(rn.minutesToday / rn.budgetMinutes * 100) : 0;
+      $('statUsage').textContent = '約 ' + rn.minutesToday + ' ／ ' + rn.budgetMinutes + ' 分鐘';
+      $('statUsage').className = 'value' + (rn.stopped ? ' err' : pct >= rn.warnPercent ? ' warn' : '');
+      $('statUsageNote').textContent = rn.stopped
+        ? (rn.lastHeartbeatAt ? '背景處理已停止，可能是今日額度已用完，請稍後查看或聯絡系統維護人員' : '背景處理尚未啟動')
+        : '最後運作：' + fmtTime(rn.lastHeartbeatAt) + (rn.hasPendingWork ? '｜有工作處理中' : '');
+    }
     var box = $('sysCard'); box.innerHTML = '';
     box.appendChild(el('div', { class: 'muted' }, home.firmName + '｜系統版本 ' + home.version + '｜伺服器時間 ' + home.serverTime));
     if (home.system) {
@@ -190,6 +205,9 @@
     document.querySelectorAll('main section').forEach(function (s) { s.classList.toggle('hidden', s.id !== 'page-' + page); });
     if (page === 'home') call('getHome', {}, renderHome);
     if (page === 'companies') loadCompanies();
+    if (page === 'bindings') loadBindings();
+    if (page === 'customers') loadCustomers();
+    if (page === 'invites') loadInvites();
     if (page === 'admins') loadAdmins();
     if (page === 'settings') { loadUnclassified(); loadSettings(); }
   }
@@ -261,6 +279,312 @@
     var text = to === 'SUSPENDED' ? '停用後此公司不再收新文件，但客戶仍可瀏覽歷史文件、檔案不會刪除。確定停用「' + c.name + '」？' : '確定重新啟用「' + c.name + '」？';
     if (!confirm(text)) return;
     call('setCompanyStatus', { companyId: c.companyId, status: to }, loadCompanies);
+  }
+
+  /* ---------- 客戶綁定審核（5.1、AC-47） ---------- */
+  var SOURCE_LABEL = { TAX_ID: '統編申請', INVITE: '邀請連結' };
+
+  function setNavPending(n) { $('navPending').textContent = n ? String(n) : ''; }
+
+  function loadBindings() {
+    $('bindingBox').textContent = '載入中…';
+    call('listBindings', {}, function (list) {
+      setNavPending(list.length);
+      var box = $('bindingBox'); box.innerHTML = '';
+      if (!list.length) { box.appendChild(el('div', { class: 'muted' }, '目前沒有待審核的申請。')); return; }
+      var t = el('table');
+      var cg = el('colgroup'); ['120px', '', '', '', '90px', '150px'].forEach(function (w) { cg.appendChild(el('col', w ? { style: 'width:' + w } : {})); }); t.appendChild(cg);
+      var h = el('tr'); ['申請時間', '客戶', '申請公司', 'Google 帳號', '來源', '操作'].forEach(function (x) { h.appendChild(el('th', {}, x)); }); t.appendChild(h);
+      list.forEach(function (b) {
+        var tr = el('tr');
+        tr.appendChild(el('td', {}, fmtTime(b.requestedAt)));
+        var c1 = el('td');
+        c1.appendChild(el('div', {}, 'LINE：' + (b.lineDisplayName || '（未提供）')));
+        if (b.customerName) c1.appendChild(el('div', { class: 'muted' }, '稱呼：' + b.customerName));
+        if (b.otherCompanies.length) c1.appendChild(el('div', { class: 'muted' }, '已綁定：' + b.otherCompanies.join('、')));
+        tr.appendChild(c1);
+        var c2 = el('td'); c2.appendChild(el('div', {}, b.companyName)); c2.appendChild(el('div', { class: 'muted' }, b.companyId));
+        if (b.companyIssue) { c2.appendChild(badge(b.companyIssue, 'err')); c2.appendChild(el('div', { class: 'muted' }, '請先到「公司管理」完成設定才能核准')); }
+        tr.appendChild(c2);
+        tr.appendChild(el('td', {}, b.googleEmail));
+        var c4 = el('td'); c4.appendChild(badge(SOURCE_LABEL[b.source] || b.source)); tr.appendChild(c4);
+        var op = el('td');
+        var ok = el('button', { class: 'btn small' }, '審核核准'); ok.disabled = !!b.companyIssue; ok.onclick = function () { approveDialog(b); };
+        var no = el('button', { class: 'btn small danger' }, '拒絕');
+        no.onclick = function () {
+          if (!confirm('確定拒絕「' + b.companyName + '」的綁定申請（' + b.googleEmail + '）？\n拒絕後客戶可重新申請。')) return;
+          call('rejectBinding', { bindingRequestId: b.bindingRequestId }, loadBindings);
+        };
+        op.appendChild(ok); op.appendChild(no); tr.appendChild(op);
+        t.appendChild(tr);
+      });
+      box.appendChild(t);
+    }, function (err) { $('bindingBox').textContent = err.message; });
+  }
+
+  function approveDialog(b) {
+    var m = openModal('核准綁定申請');
+    m.appendChild(el('div', {}, '公司：' + b.companyName + '（' + b.companyId + '）'));
+    m.appendChild(el('div', { class: 'muted' }, '來源：' + (SOURCE_LABEL[b.source] || b.source) + '｜LINE 名稱：' + (b.lineDisplayName || '（未提供）')));
+    m.appendChild(el('div', { style: 'margin-top:12px;font-weight:600' }, '即將授權的 Google 帳號'));
+    m.appendChild(el('div', { class: 'big' }, b.googleEmail));
+    m.appendChild(el('p', { class: 'muted' }, '核准後，系統會把此公司資料夾的「檢視」權限授予上方 Google 帳號，此帳號可以看到並下載該資料夾內的全部文件。'));
+    var name = null;
+    if (b.needsCustomerName) {
+      name = field(m, '客戶稱呼（首次核准必填）', el('input', { type: 'text', maxlength: '50' }));
+      name.value = b.companyName;
+      m.lastChild.appendChild(el('div', { class: 'internal' }, '僅供內部辨識，請使用正式名稱，勿使用不當稱呼'));
+    } else {
+      m.appendChild(el('div', { class: 'muted', style: 'margin-bottom:8px' }, '客戶稱呼：' + b.customerName + '（可於客戶管理修改）'));
+    }
+    var lb = el('label', { style: 'display:flex;gap:8px;align-items:flex-start;margin-top:8px' });
+    var cb = el('input', { type: 'checkbox' });
+    lb.appendChild(cb); lb.appendChild(document.createTextNode('我已確認上方 Google 帳號正確，同意授權'));
+    m.appendChild(lb);
+    modalActions(m, '核准', function (fail) {
+      if (!cb.checked) return fail('請先勾選確認 Google 帳號');
+      call('approveBinding', { bindingRequestId: b.bindingRequestId, confirmEmail: b.googleEmail, customerName: name ? name.value : '' },
+        function () { closeModal(); alert('已核准。系統將於 1～2 分鐘內自動完成雲端硬碟授權，完成後寄 Email 通知客戶。'); loadBindings(); },
+        function (e) { fail(e.message); });
+    });
+  }
+
+  /* ---------- 客戶管理（第十七章、5.4、5.6、5.7） ---------- */
+  var custData = null;
+  var UCP_STATUS = { PENDING_SYNC: ['設定中', 'warn'], ACTIVE: ['生效中', 'ok'], SUSPENDED: ['已暫停', 'off'], REVOKED: ['已解除', 'off'] };
+
+  function loadCustomers() {
+    $('customerBox').textContent = '載入中…';
+    call('listCustomers', {}, function (d) { custData = d; renderCustomers(); }, function (err) { $('customerBox').textContent = err.message; });
+  }
+
+  $('custSearch').addEventListener('input', function () { if (custData) renderCustomers(); });
+
+  function driveCell(b, caps) {
+    var td = el('td'); var d = b.drive;
+    if (!d) { td.appendChild(el('span', { class: 'muted' }, '—')); return td; }
+    var map = { ACTIVE: ['已授權', 'ok'], PENDING: ['授權中', 'warn'], SYNCING: ['授權中', 'warn'], SYNC_FAILED: ['授權失敗', 'err'], REVOKING: ['撤銷中', 'warn'], REVOKED: ['已撤銷', 'off'] };
+    var s = map[d.status] || [d.status, ''];
+    if (d.status === 'REVOKING' && d.retryExhausted) s = ['撤銷失敗', 'err'];
+    td.appendChild(badge(s[0], s[1]));
+    if (d.status === 'SYNC_FAILED' || (d.status === 'REVOKING' && d.retryExhausted)) {
+      if (d.lastError) td.appendChild(el('div', { class: 'muted' }, driveErrorText(d.lastError)));
+      if (caps.canResync) {
+        var r = el('button', { class: 'btn small secondary' }, d.status === 'SYNC_FAILED' ? '重新同步' : '重試撤銷');
+        r.onclick = function () { call('retryPermission', { permissionId: d.permissionId }, function () { alert('已排入背景處理，約 1～2 分鐘後完成。'); loadCustomers(); }); };
+        td.appendChild(el('div')).appendChild(r);
+      }
+    }
+    return td;
+  }
+
+  function driveErrorText(msg) {
+    if (/no Google account|Notify people/i.test(msg)) return '此 Email 不是 Google 帳號，請與客戶確認後「變更帳號」';
+    return msg.length > 80 ? msg.slice(0, 80) + '…' : msg;
+  }
+
+  function renderCustomers() {
+    var d = custData, caps = d.capabilities;
+    var box = $('customerBox'); box.innerHTML = '';
+    var k = $('custSearch').value.trim().toLowerCase();
+    var list = d.customers.filter(function (c) {
+      if (!k) return true;
+      var text = [c.customerName, c.lineDisplayName, c.email].concat(c.bindings.map(function (b) { return b.companyName + ' ' + b.companyId + ' ' + b.googleEmail; })).join(' ').toLowerCase();
+      return text.indexOf(k) >= 0;
+    });
+    $('custCount').textContent = '共 ' + list.length + ' 位客戶';
+    if (!d.customers.length) { box.appendChild(el('div', { class: 'card muted' }, '尚無客戶。客戶在 LINE 申請綁定並經核准後，會出現在這裡。')); return; }
+    list.forEach(function (c) {
+      var anon = c.status === 'ANONYMIZED';
+      var card = el('div', { class: 'cust' });
+      var head = el('div', { class: 'cust-head' });
+      head.appendChild(el('span', { class: 'name' }, c.customerName || '（未設定稱呼）'));
+      if (anon) head.appendChild(badge('已清除個人資料', 'off'));
+      if (!anon && c.lineDisplayName) head.appendChild(el('span', { class: 'muted' }, 'LINE：' + c.lineDisplayName));
+      if (!anon && caps.canEditCustomer && c.bindings.some(function (b) { return b.status !== 'REVOKED'; })) {
+        var bn = el('button', { class: 'linkbtn' }, '修改稱呼'); bn.onclick = function () { nameDialog(c); }; head.appendChild(bn);
+      }
+      var bh = el('button', { class: 'linkbtn' }, '綁定歷程'); bh.onclick = function () { historyDialog(c); }; head.appendChild(bh);
+      if (!anon && caps.isSuper && c.bindings.every(function (b) { return b.status === 'REVOKED'; })) {
+        var ba = el('button', { class: 'linkbtn', style: 'color:#b42318' }, '清除個人資料'); ba.onclick = function () { anonymizeDialog(c); }; head.appendChild(ba);
+      }
+      card.appendChild(head);
+      var t = el('table');
+      var cg = el('colgroup'); ['', '', '80px', '150px', '170px'].forEach(function (w) { cg.appendChild(el('col', w ? { style: 'width:' + w } : {})); }); t.appendChild(cg);
+      var h = el('tr'); ['公司', 'Google 帳號（下載用）', '綁定', '雲端權限', '操作'].forEach(function (x) { h.appendChild(el('th', {}, x)); }); t.appendChild(h);
+      c.bindings.forEach(function (b) {
+        var tr = el('tr', b.status === 'REVOKED' ? { class: 'dim' } : {});
+        var c1 = el('td'); c1.appendChild(el('div', {}, b.companyName)); c1.appendChild(el('div', { class: 'muted' }, b.companyId)); tr.appendChild(c1);
+        var c2 = el('td'); c2.appendChild(el('div', {}, b.googleEmail));
+        if (!anon && caps.canEditCustomer && b.status !== 'REVOKED') {
+          var be = el('button', { class: 'linkbtn' }, '變更帳號'); be.onclick = function () { customerEmailDialog(c, b); }; c2.appendChild(be);
+        }
+        tr.appendChild(c2);
+        var st = UCP_STATUS[b.status] || [b.status, '']; var c3 = el('td'); c3.appendChild(badge(st[0], st[1])); tr.appendChild(c3);
+        tr.appendChild(driveCell(b, caps));
+        var op = el('td');
+        if (caps.canApprove && !anon) {
+          if (b.status === 'ACTIVE' || b.status === 'PENDING_SYNC') op.appendChild(opButton('暫停', 'secondary', b, 'SUSPEND'));
+          if (b.status === 'SUSPENDED') op.appendChild(opButton('恢復', 'secondary', b, 'RESTORE'));
+          if (b.status !== 'REVOKED') op.appendChild(opButton('解除綁定', 'danger', b, 'REVOKE'));
+        }
+        tr.appendChild(op);
+        t.appendChild(tr);
+      });
+      var wrap = el('div', { style: 'overflow-x:auto' }); wrap.appendChild(t); card.appendChild(wrap);
+      box.appendChild(card);
+    });
+  }
+
+  var OP_TEXT = {
+    SUSPEND: '暫停後，系統會撤銷此 Google 帳號對「{c}」資料夾的檢視權限，客戶也無法再傳文件到這家公司。之後可以按「恢復」。確定暫停？',
+    RESTORE: '恢復後，系統會重新授予「{c}」資料夾的檢視權限。確定恢復？',
+    REVOKE: '解除綁定後，系統會撤銷「{c}」資料夾的檢視權限，而且無法直接恢復（客戶需重新申請或使用邀請連結）。確定解除綁定？'
+  };
+  function opButton(text, cls, b, op) {
+    var btn = el('button', { class: 'btn small ' + cls }, text);
+    btn.onclick = function () {
+      if (!confirm(OP_TEXT[op].replace('{c}', b.companyName))) return;
+      call('setBindingStatus', { ucpId: b.ucpId, op: op }, loadCustomers);
+    };
+    return btn;
+  }
+
+  function nameDialog(c) {
+    var m = openModal('修改客戶稱呼');
+    var input = field(m, '客戶稱呼', el('input', { type: 'text', maxlength: '50' }));
+    input.value = c.customerName;
+    m.lastChild.appendChild(el('div', { class: 'internal' }, '僅供內部辨識，請使用正式名稱，勿使用不當稱呼'));
+    modalActions(m, '儲存', function (fail) {
+      call('setCustomerName', { userId: c.userId, name: input.value }, function () { closeModal(); loadCustomers(); }, function (e) { fail(e.message); });
+    });
+  }
+
+  function customerEmailDialog(c, b) {
+    var m = openModal('變更 Google 帳號：' + b.companyName);
+    m.appendChild(el('div', { class: 'muted', style: 'margin-bottom:8px' }, '目前：' + b.googleEmail + '。變更後系統會撤銷舊帳號的檢視權限、授權新帳號，完成後寄 Email 通知客戶。'));
+    var input = field(m, '新的 Google 帳號（Email）', el('input', { type: 'text', placeholder: 'name@gmail.com' }));
+    modalActions(m, '下一步', function (fail) {
+      call('checkEmail', { email: input.value }, function (r) {
+        var addr = r.email;
+        if (r.suggestion && confirm('您是不是要輸入「' + r.suggestion + '」？\n按「確定」採用建議，按「取消」維持原輸入。')) addr = r.suggestion;
+        confirmBig('請確認新的 Google 帳號', addr, '此帳號將取得「' + b.companyName + '」資料夾的檢視權限，請確認無誤。', '確認變更', function (fail2) {
+          call('setCustomerEmail', { ucpId: b.ucpId, email: addr }, function () { closeModal(); loadCustomers(); }, function (e) { fail2(e.message); });
+        });
+      }, function (e) { fail(e.message); });
+    });
+  }
+
+  function historyDialog(c) {
+    var m = openModal('綁定歷程：' + (c.customerName || c.lineDisplayName));
+    var box = el('div', {}, '載入中…'); m.appendChild(box);
+    var bar = el('div', { class: 'actions' }); var close = el('button', { class: 'btn secondary' }, '關閉'); close.onclick = closeModal; bar.appendChild(close); m.appendChild(bar);
+    call('customerHistory', { userId: c.userId }, function (list) {
+      box.innerHTML = '';
+      if (!list.length) { box.textContent = '沒有紀錄'; return; }
+      var t = el('table');
+      var h = el('tr'); ['時間', '動作', '公司', '操作者', 'Google 帳號'].forEach(function (x) { h.appendChild(el('th', {}, x)); }); t.appendChild(h);
+      list.forEach(function (x) {
+        var tr = el('tr');
+        tr.appendChild(el('td', {}, fmtTime(x.time)));
+        tr.appendChild(el('td', {}, x.label + (x.source ? '（' + (SOURCE_LABEL[x.source] || x.source) + '）' : '')));
+        tr.appendChild(el('td', {}, x.companyName));
+        tr.appendChild(el('td', {}, x.actor));
+        tr.appendChild(el('td', {}, x.previousEmail ? x.previousEmail + ' → ' + x.email : x.email));
+        t.appendChild(tr);
+      });
+      var wrap = el('div', { style: 'overflow-x:auto' }); wrap.appendChild(t); box.appendChild(wrap);
+    }, function (e) { box.textContent = e.message; });
+  }
+
+  function anonymizeDialog(c) {
+    if (!confirm('清除「' + (c.customerName || c.lineDisplayName) + '」的個人資料？\n\n會清除：LINE 識別、客戶稱呼、LINE 名稱、所有 Google 帳號紀錄。\n會保留：雲端硬碟文件與處理紀錄。\n\n此操作無法復原。')) return;
+    if (!confirm('再次確認：清除後無法復原，確定執行？')) return;
+    call('anonymizeCustomer', { userId: c.userId }, function () { alert('已清除個人資料。'); loadCustomers(); });
+  }
+
+  /* ---------- 邀請管理（第六章） ---------- */
+  var INVITE_STATUS = { ACTIVE: ['可使用', 'ok'], USED: ['已使用', ''], EXPIRED: ['已過期', 'off'], REVOKED: ['已撤銷', 'off'] };
+  var invData = null;
+
+  function loadInvites() {
+    $('inviteBox').textContent = '載入中…';
+    call('listInvites', {}, function (d) {
+      invData = d;
+      var box = $('inviteBox'); box.innerHTML = '';
+      if (!d.invites.length) { box.appendChild(el('div', { class: 'muted' }, '尚未建立任何邀請連結。')); return; }
+      var t = el('table');
+      var cg = el('colgroup'); ['', '120px', '120px', '80px', '', '90px', '100px'].forEach(function (w) { cg.appendChild(el('col', w ? { style: 'width:' + w } : {})); }); t.appendChild(cg);
+      var h = el('tr'); ['公司', '建立時間', '到期時間', '狀態', '使用者', '建立者', '操作'].forEach(function (x) { h.appendChild(el('th', {}, x)); }); t.appendChild(h);
+      d.invites.forEach(function (i) {
+        var tr = el('tr', i.status === 'ACTIVE' ? {} : { class: 'dim' });
+        tr.appendChild(el('td', {}, i.companyName));
+        tr.appendChild(el('td', {}, fmtTime(i.createdAt)));
+        tr.appendChild(el('td', {}, fmtTime(i.expireAt)));
+        var s = INVITE_STATUS[i.status] || [i.status, '']; var c = el('td'); c.appendChild(badge(s[0], s[1])); tr.appendChild(c);
+        tr.appendChild(el('td', {}, i.usedBy ? i.usedBy + '（' + fmtTime(i.usedAt) + '）' : ''));
+        tr.appendChild(el('td', {}, i.createdBy));
+        var op = el('td');
+        if (i.status === 'ACTIVE') {
+          var r = el('button', { class: 'btn small danger' }, '撤銷');
+          r.onclick = function () { if (confirm('確定撤銷「' + i.companyName + '」的邀請連結？撤銷後客戶將無法使用。')) call('revokeInvite', { inviteId: i.inviteId }, loadInvites); };
+          op.appendChild(r);
+        } else if (i.status === 'EXPIRED' || i.status === 'REVOKED') {
+          var again = el('button', { class: 'btn small secondary' }, '重新建立');
+          again.onclick = function () { createInvite(i.companyId); };
+          op.appendChild(again);
+        }
+        tr.appendChild(op);
+        t.appendChild(tr);
+      });
+      box.appendChild(t);
+    }, function (err) { $('inviteBox').textContent = err.message; });
+  }
+
+  $('addInviteBtn').onclick = function () {
+    var open = function () {
+      var m = openModal('建立邀請連結');
+      if (!invData.companies.length) {
+        m.appendChild(el('div', { class: 'muted' }, '沒有可建立邀請的公司（需為啟用中且在您的負責範圍）。'));
+        var bar = el('div', { class: 'actions' }); var close = el('button', { class: 'btn secondary' }, '關閉'); close.onclick = closeModal; bar.appendChild(close); m.appendChild(bar);
+        return;
+      }
+      var q = field(m, '搜尋公司', el('input', { type: 'text', placeholder: '輸入統編或公司名稱' }));
+      var sel = field(m, '選擇公司', el('select', { size: '8' }));
+      var fill = function () {
+        var k = q.value.trim().toLowerCase(); sel.innerHTML = '';
+        invData.companies.filter(function (c) { return !k || (c.name + ' ' + c.companyId).toLowerCase().indexOf(k) >= 0; }).forEach(function (c) {
+          sel.appendChild(el('option', { value: c.companyId }, c.name + '（' + c.companyId + '）'));
+        });
+      };
+      q.addEventListener('input', fill); fill();
+      modalActions(m, '建立', function (fail) {
+        if (!sel.value) return fail('請選擇公司');
+        createInvite(sel.value, fail);
+      });
+    };
+    if (invData) open(); else call('listInvites', {}, function (d) { invData = d; open(); });
+  };
+
+  function createInvite(companyId, fail) {
+    call('createInvite', { companyId: companyId }, function (r) {
+      var m = openModal('邀請連結已建立');
+      m.appendChild(el('div', {}, '公司：' + r.companyName));
+      var box = el('div', { class: 'linkbox' });
+      var input = el('input', { type: 'text', readonly: 'readonly' }); input.value = r.url;
+      var copy = el('button', { class: 'btn' }, '複製連結');
+      copy.onclick = function () {
+        input.select();
+        var done = function () { copy.textContent = '已複製 ✓'; };
+        if (navigator.clipboard) navigator.clipboard.writeText(r.url).then(done, function () { document.execCommand('copy'); done(); });
+        else { document.execCommand('copy'); done(); }
+      };
+      box.appendChild(input); box.appendChild(copy); m.appendChild(box);
+      m.appendChild(el('p', { class: 'muted' }, '請把連結用 LINE 傳給客戶，客戶需在手機 LINE 裡點開。有效期限至 ' + fmtTime(r.expireAt) + '，只能使用一次。'));
+      m.appendChild(el('div', { class: 'alert' }, '為了安全，連結只會顯示這一次，關閉後無法再查看。若遺失，請撤銷後重新建立。'));
+      var bar = el('div', { class: 'actions' }); var close = el('button', { class: 'btn secondary' }, '關閉');
+      close.onclick = function () { closeModal(); loadInvites(); }; bar.appendChild(close); m.appendChild(bar);
+    }, function (e) { if (fail) fail(e.message); else alert(e.message); });
   }
 
   /* ---------- 管理員管理 ---------- */
@@ -596,6 +920,7 @@
   $('menuBtn').onclick = function () { $('nav').classList.add('open'); $('navMask').classList.add('open'); };
   $('navMask').onclick = closeMenu;
   document.querySelectorAll('nav a[data-page]').forEach(function (a) { a.onclick = function () { closeMenu(); go(a.getAttribute('data-page')); }; });
+  $('statPending').onclick = function () { go('bindings'); };
   $('overlay').onclick = function (e) { if (e.target === $('overlay')) closeModal(); };
 
   function enter(notice) {

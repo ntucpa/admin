@@ -62,6 +62,19 @@
     footer { color:#98a2b3; font-size:11px; padding:8px 24px; }
     #menuBtn { display:none; background:transparent; border:0; color:#fff; font-size:22px; padding:0 6px 0 0; cursor:pointer; }
     #navMask { display:none; }
+    .navcount { display:inline-block; min-width:18px; padding:0 6px; border-radius:9px; background:var(--danger); color:#fff; font-size:11px; text-align:center; margin-left:4px; }
+    .navcount:empty { display:none; }
+    .stat.click { cursor:pointer; } .stat.click:hover { border-color:var(--navy); }
+    .stat .value.warn { color:var(--warn); } .stat .value.err { color:var(--danger); }
+    .cust { border:1px solid var(--line); border-radius:10px; padding:12px 14px; margin-bottom:12px; background:#fff; }
+    .cust-head { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-bottom:6px; }
+    .cust-head .name { font-weight:700; font-size:15px; color:var(--navy); }
+    .cust table { margin-top:4px; }
+    .internal { color:var(--warn); font-size:12px; margin-top:4px; }
+    .toolbar { display:flex; gap:8px; align-items:center; margin-bottom:12px; flex-wrap:wrap; }
+    .toolbar input[type=text] { max-width:320px; }
+    .linkbox { display:flex; gap:8px; margin:10px 0; } .linkbox input { font-family:Consolas,monospace; font-size:12px; }
+    tr.dim td { color:#98a2b3; }
     .linkbtn { background:none; border:0; color:var(--navy); text-decoration:underline; cursor:pointer; font:inherit; font-size:12px; padding:0; }
     @media (max-width:760px) {
       #menuBtn { display:inline-block; }
@@ -105,9 +118,9 @@
         <a data-page="home" class="active">首頁</a>
         <div class="sec">業務</div>
         <a data-page="companies">公司管理</a>
-        <a class="disabled">客戶綁定審核（階段 5）</a>
-        <a class="disabled">客戶管理（階段 5）</a>
-        <a class="disabled">邀請管理（階段 5）</a>
+        <a data-page="bindings" data-feature="BINDING_APPROVAL">客戶綁定審核<span class="navcount" id="navPending"></span></a>
+        <a data-page="customers">客戶管理</a>
+        <a data-page="invites" data-feature="INVITE_MANAGEMENT">邀請管理</a>
         <a class="disabled">未分類提醒（階段 8）</a>
         <a class="disabled">異常處理（階段 8）</a>
         <div class="sec super-only">系統</div>
@@ -118,7 +131,8 @@
         <section id="page-home">
           <h1>首頁</h1>
           <div class="grid">
-            <div class="card stat"><div class="label">今日背景處理用量</div><div class="value">—</div><div class="muted">階段 8 開放</div></div>
+            <div class="card stat click" id="statPending"><div class="label">待審核綁定申請</div><div class="value" id="statPendingValue">—</div><div class="muted">點此前往審核</div></div>
+            <div class="card stat"><div class="label">今日背景處理用量</div><div class="value" id="statUsage">—</div><div class="muted" id="statUsageNote"></div></div>
             <div class="card stat"><div class="label">未分類文件</div><div class="value">—</div><div class="muted">階段 8 開放</div></div>
             <div class="card stat"><div class="label">異常清單</div><div class="value">—</div><div class="muted">階段 8 開放</div></div>
           </div>
@@ -129,6 +143,24 @@
           <h1>公司管理 <button id="addCompanyBtn" class="btn hidden">＋ 新增公司</button></h1>
           <p class="muted">公司資料夾必須是系統帳號擁有的資料夾，且不可與其他公司資料夾或待分類資料夾重疊；設定後系統會自動關閉「編輯者可再分享」。</p>
           <div class="card"><div id="companyBox">載入中…</div></div>
+        </section>
+
+        <section id="page-bindings" class="hidden">
+          <h1>客戶綁定審核</h1>
+          <p class="muted">客戶在 LINE 送出的公司綁定申請。核准後，系統會自動把該公司資料夾的「檢視」權限給客戶填寫的 Google 帳號，完成後寄 Email 通知客戶。</p>
+          <div class="card"><div id="bindingBox">載入中…</div></div>
+        </section>
+
+        <section id="page-customers" class="hidden">
+          <h1>客戶管理</h1>
+          <div class="toolbar"><input type="text" id="custSearch" placeholder="搜尋客戶稱呼、LINE 名稱、公司或 Email"><span class="muted" id="custCount"></span></div>
+          <div id="customerBox">載入中…</div>
+        </section>
+
+        <section id="page-invites" class="hidden">
+          <h1>邀請管理 <button id="addInviteBtn" class="btn">＋ 建立邀請連結</button></h1>
+          <p class="muted">已綁定一家公司的客戶，要再綁定其他公司時，請建立該公司的邀請連結傳給客戶（也可用於主動邀請新客戶）。連結 7 天內有效、只能使用一次，客戶送出後仍需在「客戶綁定審核」核准。</p>
+          <div class="card"><div id="inviteBox">載入中…</div></div>
         </section>
 
         <section id="page-admins" class="hidden">
@@ -161,7 +193,7 @@
 
   <div id="overlay" class="overlay hidden"><div class="modal" id="modal"></div></div>
 
-  <script src="config.js?v=0.4.5"></script>
-  <script src="app.js?v=0.4.5"></script>
+  <script src="config.js?v=0.6.0"></script>
+  <script src="app.js?v=0.6.0"></script>
 </body>
 </html>
