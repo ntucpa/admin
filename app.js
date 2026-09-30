@@ -11,8 +11,9 @@
   var params = new URLSearchParams(location.search);
 
   /* ---------- 共用 ---------- */
-  function store(k, v) { try { if (v) sessionStorage.setItem(k, v); else sessionStorage.removeItem(k); } catch (e) {} }
-  function load(k) { try { return sessionStorage.getItem(k) || ''; } catch (e) { return ''; } }
+  /** 登入保存於本機（V4.0.4 第七章：個人電腦登入保持數天，由後端控制到期與停用） */
+  function store(k, v) { try { if (v) localStorage.setItem(k, v); else localStorage.removeItem(k); sessionStorage.removeItem(k); } catch (e) {} }
+  function load(k) { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } }
   function $(id) { return document.getElementById(id); }
   function el(tag, attrs, text) {
     var e = document.createElement(tag);
