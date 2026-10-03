@@ -219,7 +219,7 @@
     if (page === 'bindings') loadBindings();
     if (page === 'customers') loadCustomers();
     if (page === 'invites') loadInvites();
-    if (page === 'unclassified') loadUnclassified();
+    if (page === 'unclassified') loadUncReminder();
     if (page === 'exceptions') loadExceptions();
     if (page === 'takeover') loadTakeover();
     if (page === 'audit') loadAudit(false);
@@ -521,7 +521,7 @@
   /* ---------- 未分類提醒、代客分類（9.7） ---------- */
   function daysBadge(c) { return badge(c.waitingDays + ' 天', c.warn ? 'warn' : ''); }
 
-  function loadUnclassified() {
+  function loadUncReminder() {
     $('uncBox').textContent = '載入中…';
     call('listUnclassified', {}, function (d) {
       var box = $('uncBox'); box.innerHTML = '';
@@ -541,7 +541,7 @@
         var op = el('td');
         var b1 = el('button', { class: 'btn small' }, '查看文件'); b1.onclick = function () { uncDialog(c, d); };
         var b2 = el('button', { class: 'btn small secondary' }, '已聯絡');
-        b2.onclick = function () { if (confirm('確定已聯絡「' + c.customer + '」提醒他分類文件？')) call('markContacted', { userId: c.userId }, loadUnclassified); };
+        b2.onclick = function () { if (confirm('確定已聯絡「' + c.customer + '」提醒他分類文件？')) call('markContacted', { userId: c.userId }, loadUncReminder); };
         op.appendChild(b1); op.appendChild(b2); tr.appendChild(op);
         t.appendChild(tr);
       });
@@ -559,7 +559,7 @@
         var cb = el('button', { class: 'btn small danger', style: 'margin-left:8px' }, '取消整批');
         cb.onclick = function () {
           if (confirm('確定取消這整批文件？暫存檔會移入 Google 雲端硬碟垃圾桶（30 天後自動永久刪除），客戶需要重新傳送。')) {
-            call('adminCancelBatch', { batchId: b.batchId }, function () { closeModal(); loadUnclassified(); });
+            call('adminCancelBatch', { batchId: b.batchId }, function () { closeModal(); loadUncReminder(); });
           }
         };
         head.appendChild(cb);
@@ -573,11 +573,11 @@
         if (d.canException) {
           var done = el('button', { class: 'btn small secondary' }, '人工完成');
           done.onclick = function () {
-            if (confirm('確認這份文件已在系統外處理完成？檔案位置請自行處理。')) call('exceptionAction', { itemId: i.itemId, kind: 'COMPLETE' }, function () { closeModal(); loadUnclassified(); });
+            if (confirm('確認這份文件已在系統外處理完成？檔案位置請自行處理。')) call('exceptionAction', { itemId: i.itemId, kind: 'COMPLETE' }, function () { closeModal(); loadUncReminder(); });
           };
           var end = el('button', { class: 'btn small danger' }, '結束');
           end.onclick = function () {
-            if (confirm('確定結束這份文件？暫存檔會移入垃圾桶，客戶需要重新傳送。')) call('exceptionAction', { itemId: i.itemId, kind: 'END' }, function () { closeModal(); loadUnclassified(); });
+            if (confirm('確定結束這份文件？暫存檔會移入垃圾桶，客戶需要重新傳送。')) call('exceptionAction', { itemId: i.itemId, kind: 'END' }, function () { closeModal(); loadUncReminder(); });
           };
           row.appendChild(done); row.appendChild(end);
         }
@@ -596,7 +596,7 @@
         if (!ids.length) { msg.className = 'msg err'; msg.textContent = '請先勾選文件'; return; }
         if (!sel.value) { msg.className = 'msg err'; msg.textContent = '沒有可選的公司'; return; }
         if (!confirm('確定把 ' + ids.length + ' 份文件分類到「' + sel.options[sel.selectedIndex].text + '」？此為客戶明確告知的公司嗎？')) return;
-        call('classifyOnBehalf', { userId: c.userId, itemIds: ids, companyId: sel.value }, function () { closeModal(); loadUnclassified(); }, function (e) { msg.className = 'msg err'; msg.textContent = e.message; });
+        call('classifyOnBehalf', { userId: c.userId, itemIds: ids, companyId: sel.value }, function () { closeModal(); loadUncReminder(); }, function (e) { msg.className = 'msg err'; msg.textContent = e.message; });
       };
       bar.appendChild(sel); bar.appendChild(go1);
     } else {
