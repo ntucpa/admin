@@ -53,7 +53,7 @@
   }
 
   /** 只讀取、不寫入的動作：遇到 Google 連線錯誤時可安全地自動重試 */
-  var READ_ONLY = { ping: 1, loginUrl: 1, getHome: 1, getSettings: 1, listCompanies: 1, getUnclassifiedFolder: 1, listAdmins: 1, checkEmail: 1, listBindings: 1, listCustomers: 1, customerHistory: 1, listInvites: 1 };
+  var READ_ONLY = { ping: 1, loginUrl: 1, getHome: 1, getSettings: 1, listCompanies: 1, getUnclassifiedFolder: 1, listAdmins: 1, checkEmail: 1, listBindings: 1, listCustomers: 1, customerHistory: 1, listInvites: 1, listUnclassified: 1, listExceptions: 1, takeoverReport: 1, listAudit: 1 };
   var NET_ERR = 'Google 連線暫時不穩，請稍後再試一次。若是儲存或新增，請先重新整理頁面確認是否已完成，避免重複操作。';
 
   function once(name, args, t0) {
@@ -176,6 +176,17 @@
     $('statPendingValue').textContent = pend || 0;
     $('statPendingValue').className = 'value' + (pend ? ' warn' : '');
     setNavPending(pend);
+    var cn = home.counts;
+    if (cn) {
+      $('statUncValue').textContent = cn.unclassified.files + ' 份';
+      $('statUncValue').className = 'value' + (cn.unclassified.files ? ' warn' : '');
+      $('statUncNote').textContent = cn.unclassified.files ? cn.unclassified.customers + ' 位客戶｜最久已等待 ' + cn.unclassified.oldestDays + ' 天' : '目前沒有未分類的文件';
+      setNavCount('navUnc', cn.unclassified.customers);
+      $('statExc').classList.toggle('hidden', cn.exceptions === null);
+      $('statExcValue').textContent = (cn.exceptions || 0) + ' 件';
+      $('statExcValue').className = 'value' + (cn.exceptions ? ' err' : '');
+      setNavCount('navExc', cn.exceptions);
+    }
     var rn = home.runner;
     if (rn) {
       var pct = rn.budgetMinutes ? Math.round(rn.minutesToday / rn.budgetMinutes * 100) : 0;
@@ -208,6 +219,10 @@
     if (page === 'bindings') loadBindings();
     if (page === 'customers') loadCustomers();
     if (page === 'invites') loadInvites();
+    if (page === 'unclassified') loadUnclassified();
+    if (page === 'exceptions') loadExceptions();
+    if (page === 'takeover') loadTakeover();
+    if (page === 'audit') loadAudit(false);
     if (page === 'admins') loadAdmins();
     if (page === 'settings') { loadUnclassified(); loadSettings(); }
   }
@@ -502,6 +517,243 @@
     if (!confirm('再次確認：清除後無法復原，確定執行？')) return;
     call('anonymizeCustomer', { userId: c.userId }, function () { alert('已清除個人資料。'); loadCustomers(); });
   }
+
+  /* ---------- 未分類提醒、代客分類（9.7） ---------- */
+  function daysBadge(c) { return badge(c.waitingDays + ' 天', c.warn ? 'warn' : ''); }
+
+  function loadUnclassified() {
+    $('uncBox').textContent = '載入中…';
+    call('listUnclassified', {}, function (d) {
+      var box = $('uncBox'); box.innerHTML = '';
+      setNavCount('navUnc', d.customers.length);
+      if (!d.customers.length) { box.appendChild(el('div', { class: 'muted' }, '目前沒有未分類的文件。')); return; }
+      var t = el('table');
+      var cg = el('colgroup'); ['', '', '70px', '120px', '80px', '150px', '170px'].forEach(function (w) { cg.appendChild(el('col', w ? { style: 'width:' + w } : {})); }); t.appendChild(cg);
+      var h = el('tr'); ['客戶', '可收件公司', '份數', '最早收到', '已等待', '最近聯絡', '操作'].forEach(function (x) { h.appendChild(el('th', {}, x)); }); t.appendChild(h);
+      d.customers.forEach(function (c) {
+        var tr = el('tr');
+        tr.appendChild(el('td', {}, c.customer));
+        tr.appendChild(el('td', {}, c.companies.length ? c.companies.map(function (x) { return x.name; }).join('、') : '（沒有可收件公司）'));
+        tr.appendChild(el('td', {}, String(c.fileCount)));
+        tr.appendChild(el('td', {}, fmtTime(c.oldestAt)));
+        var w = el('td'); w.appendChild(daysBadge(c)); tr.appendChild(w);
+        tr.appendChild(el('td', {}, c.lastContactAt ? fmtTime(c.lastContactAt) + '　' + c.lastContactBy : '—'));
+        var op = el('td');
+        var b1 = el('button', { class: 'btn small' }, '查看文件'); b1.onclick = function () { uncDialog(c, d); };
+        var b2 = el('button', { class: 'btn small secondary' }, '已聯絡');
+        b2.onclick = function () { if (confirm('確定已聯絡「' + c.customer + '」提醒他分類文件？')) call('markContacted', { userId: c.userId }, loadUnclassified); };
+        op.appendChild(b1); op.appendChild(b2); tr.appendChild(op);
+        t.appendChild(tr);
+      });
+      box.appendChild(t);
+    }, function (err) { $('uncBox').textContent = err.message; });
+  }
+
+  function uncDialog(c, d) {
+    var m = openModal('「' + c.customer + '」的未分類文件');
+    m.appendChild(el('div', { class: 'muted', style: 'margin-bottom:8px' }, '代客分類只在客戶已用電話或 LINE 明確告知文件屬於哪家公司時使用。系統不會以檔名或內容猜測公司。'));
+    var checks = [];
+    c.batches.forEach(function (b, bi) {
+      var head = el('div', { style: 'margin-top:8px;font-weight:600' }, '第 ' + (bi + 1) + ' 批（' + b.items.length + ' 份）');
+      if (d.canException) {
+        var cb = el('button', { class: 'btn small danger', style: 'margin-left:8px' }, '取消整批');
+        cb.onclick = function () {
+          if (confirm('確定取消這整批文件？暫存檔會移入 Google 雲端硬碟垃圾桶（30 天後自動永久刪除），客戶需要重新傳送。')) {
+            call('adminCancelBatch', { batchId: b.batchId }, function () { closeModal(); loadUnclassified(); });
+          }
+        };
+        head.appendChild(cb);
+      }
+      m.appendChild(head);
+      b.items.forEach(function (i) {
+        var row = el('div', { style: 'display:flex;gap:8px;align-items:center;padding:4px 0' });
+        var ck = el('input', { type: 'checkbox' }); ck.value = i.itemId; checks.push(ck);
+        row.appendChild(ck);
+        row.appendChild(el('span', { style: 'flex:1' }, i.fileName + '　' + fmtTime(i.receivedAt) + (i.anomaly ? '　⚠ 檔案位置異常' : '')));
+        if (d.canException) {
+          var done = el('button', { class: 'btn small secondary' }, '人工完成');
+          done.onclick = function () {
+            if (confirm('確認這份文件已在系統外處理完成？檔案位置請自行處理。')) call('exceptionAction', { itemId: i.itemId, kind: 'COMPLETE' }, function () { closeModal(); loadUnclassified(); });
+          };
+          var end = el('button', { class: 'btn small danger' }, '結束');
+          end.onclick = function () {
+            if (confirm('確定結束這份文件？暫存檔會移入垃圾桶，客戶需要重新傳送。')) call('exceptionAction', { itemId: i.itemId, kind: 'END' }, function () { closeModal(); loadUnclassified(); });
+          };
+          row.appendChild(done); row.appendChild(end);
+        }
+        m.appendChild(row);
+      });
+    });
+    var bar = el('div', { class: 'actions', style: 'margin-top:12px;flex-wrap:wrap' });
+    var msg = el('div', { class: 'msg' });
+    if (d.canClassify) {
+      var sel = el('select');
+      c.companies.filter(function (x) { return x.inScope; }).forEach(function (x) { sel.appendChild(el('option', { value: x.companyId }, x.name)); });
+      if (!sel.options.length) sel.appendChild(el('option', { value: '' }, '（沒有您負責的可收件公司）'));
+      var go1 = el('button', { class: 'btn' }, '把選取的文件分類到所選公司');
+      go1.onclick = function () {
+        var ids = checks.filter(function (x) { return x.checked; }).map(function (x) { return x.value; });
+        if (!ids.length) { msg.className = 'msg err'; msg.textContent = '請先勾選文件'; return; }
+        if (!sel.value) { msg.className = 'msg err'; msg.textContent = '沒有可選的公司'; return; }
+        if (!confirm('確定把 ' + ids.length + ' 份文件分類到「' + sel.options[sel.selectedIndex].text + '」？此為客戶明確告知的公司嗎？')) return;
+        call('classifyOnBehalf', { userId: c.userId, itemIds: ids, companyId: sel.value }, function () { closeModal(); loadUnclassified(); }, function (e) { msg.className = 'msg err'; msg.textContent = e.message; });
+      };
+      bar.appendChild(sel); bar.appendChild(go1);
+    } else {
+      bar.appendChild(el('span', { class: 'muted' }, '您沒有「代客分類」權限，只能查看。'));
+    }
+    var close = el('button', { class: 'btn secondary' }, '關閉'); close.onclick = closeModal; bar.appendChild(close);
+    m.appendChild(msg); m.appendChild(bar);
+  }
+
+  /* ---------- 異常處理（12.2） ---------- */
+  function loadExceptions() {
+    $('excBox').textContent = '載入中…';
+    call('listExceptions', {}, function (d) {
+      var box = $('excBox'); box.innerHTML = '';
+      var total = d.items.length + d.permissions.length + d.takeoverItems.length;
+      setNavCount('navExc', total);
+      if (!total) { box.appendChild(el('div', { class: 'muted' }, '目前沒有需要處理的異常。')); return; }
+      if (d.items.length) {
+        box.appendChild(el('div', { class: 'card-title' }, '文件異常（' + d.items.length + '）'));
+        var t = el('table');
+        var h = el('tr'); ['類型', '客戶', '檔名', '公司', '原因', '時間', '操作'].forEach(function (x) { h.appendChild(el('th', {}, x)); }); t.appendChild(h);
+        d.items.forEach(function (i) {
+          var tr = el('tr');
+          var k = el('td'); k.appendChild(badge(i.kind === 'FAILED' ? '處理失敗' : '位置異常', i.kind === 'FAILED' ? 'err' : 'warn')); tr.appendChild(k);
+          tr.appendChild(el('td', {}, i.customer));
+          tr.appendChild(el('td', {}, i.fileName));
+          tr.appendChild(el('td', {}, i.company || '（未指定）'));
+          tr.appendChild(el('td', {}, i.kind === 'FAILED' ? i.errorLabel + (i.errorMessage ? '：' + i.errorMessage.slice(0, 80) : '') : i.anomalyLabel));
+          tr.appendChild(el('td', {}, fmtTime(i.updatedAt)));
+          var op = el('td');
+          var addBtn = function (text, cls, fn) { var b = el('button', { class: 'btn small ' + cls }, text); b.onclick = fn; op.appendChild(b); };
+          var act = function (kind, ask) { return function () { if (confirm(ask)) call('exceptionAction', { itemId: i.itemId, kind: kind }, loadExceptions); }; };
+          if (i.canRerun) addBtn('重新執行', '', act('RERUN', '重新執行這份文件的處理？'));
+          if (i.canReturn) addBtn('退回待分類', 'secondary', act('RETURN', '把這份文件退回待分類？客戶或管理員可以重新選擇公司。'));
+          if (i.canClearAnomaly) addBtn('清除異常標記', 'secondary', act('CLEAR_ANOMALY', '確認已處理檔案位置，清除異常標記？'));
+          addBtn('人工完成', 'secondary', act('COMPLETE', '確認這份文件已在系統外處理完成？'));
+          addBtn('結束', 'danger', act('END', '結束這份文件？不會標示成功。'));
+          tr.appendChild(op); t.appendChild(tr);
+        });
+        box.appendChild(t);
+      }
+      if (d.permissions.length) {
+        box.appendChild(el('div', { class: 'card-title', style: 'margin-top:16px' }, '雲端權限異常（' + d.permissions.length + '）'));
+        var t2 = el('table');
+        var h2 = el('tr'); ['對象', '帳號', '資料夾', '狀態', '錯誤', '操作'].forEach(function (x) { h2.appendChild(el('th', {}, x)); }); t2.appendChild(h2);
+        d.permissions.forEach(function (p) {
+          var tr = el('tr');
+          tr.appendChild(el('td', {}, (p.type === 'ADMIN' ? '管理員 ' : '客戶 ') + p.who));
+          tr.appendChild(el('td', {}, p.email));
+          tr.appendChild(el('td', {}, p.company));
+          tr.appendChild(el('td', {}, p.status === 'SYNC_FAILED' ? '授權失敗' : '撤銷停滯'));
+          tr.appendChild(el('td', {}, p.lastError));
+          var op = el('td');
+          var b = el('button', { class: 'btn small' }, p.status === 'SYNC_FAILED' ? '重新同步' : '重試撤銷');
+          b.onclick = function () { call(p.type === 'ADMIN' ? 'retryAdminPermission' : 'retryPermission', { permissionId: p.permissionId }, loadExceptions); };
+          op.appendChild(b); tr.appendChild(op); t2.appendChild(tr);
+        });
+        box.appendChild(t2);
+      }
+      if (d.takeoverItems.length) {
+        box.appendChild(el('div', { class: 'card-title', style: 'margin-top:16px' }, '檔案移交失敗（' + d.takeoverItems.length + '）'));
+        var t3 = el('table');
+        var h3 = el('tr'); ['項目', '類型', '原擁有者', '錯誤', '操作'].forEach(function (x) { h3.appendChild(el('th', {}, x)); }); t3.appendChild(h3);
+        d.takeoverItems.forEach(function (x) {
+          var tr = el('tr');
+          tr.appendChild(el('td', {}, x.name));
+          tr.appendChild(el('td', {}, x.itemType === 'FOLDER' ? '資料夾' : '檔案'));
+          tr.appendChild(el('td', {}, x.email));
+          tr.appendChild(el('td', {}, x.error.slice(0, 120)));
+          var op = el('td');
+          var r1 = el('button', { class: 'btn small' }, '重試'); r1.onclick = function () { call('takeoverItemAction', { takeoverItemId: x.takeoverItemId, kind: 'RETRY' }, loadExceptions); };
+          var r2 = el('button', { class: 'btn small secondary' }, '已人工處理');
+          r2.onclick = function () { if (confirm('確認這個項目已在 Google 雲端硬碟手動處理完成？')) call('takeoverItemAction', { takeoverItemId: x.takeoverItemId, kind: 'DONE' }, loadExceptions); };
+          op.appendChild(r1); op.appendChild(r2); tr.appendChild(op); t3.appendChild(tr);
+        });
+        box.appendChild(t3);
+      }
+    }, function (err) { $('excBox').textContent = err.message; });
+  }
+
+  /* ---------- 非事務所擁有的檔案與檔案移交（8.3；僅超級管理員） ---------- */
+  var TAKEOVER_STATUS = { PENDING: '等待處理', PROCESSING: '處理中', COMPLETED: '完成', COMPLETED_WITH_ERRORS: '完成（有失敗項目）' };
+  var TAKEOVER_REASON = { ADMIN_SUSPENDED: '停用管理員', EMAIL_CHANGED: '更換 Google 帳號', SCOPE_REMOVED: '移出負責公司', MANUAL: '手動執行' };
+
+  function loadTakeover() {
+    $('takeBox').textContent = '載入中（需查詢 Google 雲端硬碟，可能要幾秒）…';
+    call('takeoverReport', {}, function (d) {
+      var box = $('takeBox'); box.innerHTML = '';
+      box.appendChild(el('div', { class: 'card-title' }, '各管理員在公司資料夾內擁有的項目'));
+      var t = el('table');
+      var h = el('tr'); ['管理員', 'Google 帳號', '項目數', '分布', '操作'].forEach(function (x) { h.appendChild(el('th', {}, x)); }); t.appendChild(h);
+      d.admins.forEach(function (a) {
+        var tr = el('tr');
+        tr.appendChild(el('td', {}, a.name + (a.status === 'SUSPENDED' ? '（已停用）' : '')));
+        tr.appendChild(el('td', {}, a.email));
+        tr.appendChild(el('td', {}, a.error ? '查詢失敗' : a.total + '（含 ' + a.folders + ' 個資料夾）'));
+        tr.appendChild(el('td', {}, a.byCompany.map(function (c) { return c.name + ' ' + c.count; }).join('、') || '—'));
+        var op = el('td');
+        if (a.inProgress) op.appendChild(badge('移交進行中', 'warn'));
+        else if (a.total > 0) {
+          var b = el('button', { class: 'btn small' }, '執行移交');
+          b.onclick = function () {
+            if (confirm('確定把「' + a.name + '」擁有的 ' + a.total + ' 個項目移交給系統帳號？\n檔案會改為系統帳號擁有的同名複本（原檔的版本紀錄與留言不保留）。')) {
+              call('manualTakeover', { adminId: a.adminId, companyId: '' }, function () { alert('已排入背景處理，完成後這裡會顯示紀錄。'); loadTakeover(); });
+            }
+          };
+          op.appendChild(b);
+        }
+        tr.appendChild(op); t.appendChild(tr);
+      });
+      box.appendChild(t);
+      box.appendChild(el('div', { class: 'card-title', style: 'margin-top:16px' }, '最近的移交紀錄'));
+      if (!d.history.length) { box.appendChild(el('div', { class: 'muted' }, '尚無移交紀錄。')); return; }
+      var t2 = el('table');
+      var h2 = el('tr'); ['時間', '管理員', '原因', '範圍', '狀態', '結果'].forEach(function (x) { h2.appendChild(el('th', {}, x)); }); t2.appendChild(h2);
+      d.history.forEach(function (x) {
+        var tr = el('tr');
+        tr.appendChild(el('td', {}, fmtTime(x.createdAt)));
+        tr.appendChild(el('td', {}, x.admin));
+        tr.appendChild(el('td', {}, TAKEOVER_REASON[x.reason] || x.reason));
+        tr.appendChild(el('td', {}, x.company));
+        tr.appendChild(el('td', {}, TAKEOVER_STATUS[x.status] || x.status));
+        tr.appendChild(el('td', {}, '成功 ' + x.done + ' ／ 失敗 ' + x.failed + ' ／ 共 ' + x.total));
+        t2.appendChild(tr);
+      });
+      box.appendChild(t2);
+    }, function (err) { $('takeBox').textContent = err.message; });
+  }
+
+  /* ---------- 稽核紀錄（僅超級管理員） ---------- */
+  var auditOffset = 0;
+  function loadAudit(more) {
+    if (!more) { auditOffset = 0; $('auditBox').innerHTML = ''; }
+    var args = { from: $('auditFrom').value, to: $('auditTo').value, action: $('auditAction').value, actor: $('auditActor').value, offset: auditOffset };
+    call('listAudit', args, function (d) {
+      var box = $('auditBox');
+      var t = box.querySelector('table');
+      if (!t) {
+        t = el('table');
+        var h = el('tr'); ['時間', '操作者', '動作', '公司', '對象', '結果', '細節'].forEach(function (x) { h.appendChild(el('th', {}, x)); }); t.appendChild(h);
+        box.innerHTML = ''; box.appendChild(t);
+      }
+      d.records.forEach(function (r) {
+        var tr = el('tr');
+        [fmtTime(r.time), r.actor, r.action, r.company, r.target, r.result, r.context].forEach(function (v, i) { tr.appendChild(el('td', i === 6 ? { style: 'word-break:break-all;font-size:12px' } : {}, String(v || ''))); });
+        t.appendChild(tr);
+      });
+      auditOffset += d.records.length;
+      $('auditCount').textContent = '符合條件共 ' + d.total + ' 筆，已顯示 ' + auditOffset + ' 筆';
+      $('auditMore').classList.toggle('hidden', auditOffset >= d.total);
+      if (!d.total) box.textContent = '沒有符合條件的紀錄。';
+    }, function (err) { $('auditBox').textContent = err.message; });
+  }
+  $('auditSearch').onclick = function () { loadAudit(false); };
+  $('auditMore').onclick = function () { loadAudit(true); };
+
+  function setNavCount(id, n) { $(id).textContent = n ? String(n) : ''; }
 
   /* ---------- 邀請管理（第六章） ---------- */
   var INVITE_STATUS = { ACTIVE: ['可使用', 'ok'], USED: ['已使用', ''], EXPIRED: ['已過期', 'off'], REVOKED: ['已撤銷', 'off'] };
@@ -921,6 +1173,8 @@
   $('navMask').onclick = closeMenu;
   document.querySelectorAll('nav a[data-page]').forEach(function (a) { a.onclick = function () { closeMenu(); go(a.getAttribute('data-page')); }; });
   $('statPending').onclick = function () { go('bindings'); };
+  $('statUnc').onclick = function () { go('unclassified'); };
+  $('statExc').onclick = function () { go('exceptions'); };
   $('overlay').onclick = function (e) { if (e.target === $('overlay')) closeModal(); };
 
   function enter(notice) {

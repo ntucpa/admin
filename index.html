@@ -121,10 +121,12 @@
         <a data-page="bindings" data-feature="BINDING_APPROVAL">客戶綁定審核<span class="navcount" id="navPending"></span></a>
         <a data-page="customers">客戶管理</a>
         <a data-page="invites" data-feature="INVITE_MANAGEMENT">邀請管理</a>
-        <a class="disabled">未分類提醒（階段 8）</a>
-        <a class="disabled">異常處理（階段 8）</a>
+        <a data-page="unclassified">未分類提醒<span class="navcount" id="navUnc"></span></a>
+        <a data-page="exceptions" data-feature="EXCEPTION_HANDLING">異常處理<span class="navcount" id="navExc"></span></a>
         <div class="sec super-only">系統</div>
         <a data-page="admins" class="super-only">管理員管理</a>
+        <a data-page="takeover" class="super-only">非事務所擁有的檔案</a>
+        <a data-page="audit" class="super-only">稽核紀錄</a>
         <a data-page="settings" class="super-only">系統設定</a>
       </nav>
       <main>
@@ -133,8 +135,8 @@
           <div class="grid">
             <div class="card stat click" id="statPending"><div class="label">待審核綁定申請</div><div class="value" id="statPendingValue">—</div><div class="muted">點此前往審核</div></div>
             <div class="card stat"><div class="label">今日背景處理用量</div><div class="value" id="statUsage">—</div><div class="muted" id="statUsageNote"></div></div>
-            <div class="card stat"><div class="label">未分類文件</div><div class="value">—</div><div class="muted">階段 8 開放</div></div>
-            <div class="card stat"><div class="label">異常清單</div><div class="value">—</div><div class="muted">階段 8 開放</div></div>
+            <div class="card stat click" id="statUnc"><div class="label">未分類文件</div><div class="value" id="statUncValue">—</div><div class="muted" id="statUncNote">點此查看</div></div>
+            <div class="card stat click" id="statExc"><div class="label">異常清單</div><div class="value" id="statExcValue">—</div><div class="muted">點此處理</div></div>
           </div>
           <div class="card" id="sysCard"></div>
         </section>
@@ -169,6 +171,37 @@
           <div class="card"><div id="adminBox">載入中…</div></div>
         </section>
 
+        <section id="page-unclassified" class="hidden">
+          <h1>未分類提醒</h1>
+          <p class="muted">多公司客戶傳了文件卻還沒選公司。可按「已聯絡」記錄你提醒過客戶；客戶用電話或 LINE 告訴你公司時，可以「代客分類」。等待天數達到提示天數會以黃色標示。</p>
+          <div class="card"><div id="uncBox">載入中…</div></div>
+        </section>
+
+        <section id="page-exceptions" class="hidden">
+          <h1>異常處理</h1>
+          <p class="muted">這裡只列出需要人處理的事：處理失敗的文件、檔案位置異常、雲端權限同步失敗。正常的資料不會出現。</p>
+          <div class="card"><div id="excBox">載入中…</div></div>
+        </section>
+
+        <section id="page-takeover" class="hidden">
+          <h1>非事務所擁有的檔案</h1>
+          <p class="muted">管理員在公司資料夾內自己建立的檔案，擁有者是管理員本人。停用管理員、更換 Google 帳號或移出負責公司時，系統會自動把這些檔案移交給系統帳號，完成後才撤銷其雲端權限。這裡也可以手動執行。</p>
+          <div class="card"><div id="takeBox">載入中…</div></div>
+        </section>
+
+        <section id="page-audit" class="hidden">
+          <h1>稽核紀錄</h1>
+          <div class="toolbar">
+            <input type="date" id="auditFrom" title="起日"> ～ <input type="date" id="auditTo" title="迄日">
+            <input type="text" id="auditAction" placeholder="動作關鍵字，例如 TAKEOVER">
+            <input type="text" id="auditActor" placeholder="操作者姓名">
+            <button id="auditSearch" class="btn">查詢</button>
+          </div>
+          <div class="muted" id="auditCount"></div>
+          <div class="card"><div id="auditBox">請按「查詢」。</div></div>
+          <button id="auditMore" class="btn secondary hidden">載入更多</button>
+        </section>
+
         <section id="page-settings" class="hidden">
           <h1>系統設定</h1>
           <div class="card">
@@ -193,7 +226,7 @@
 
   <div id="overlay" class="overlay hidden"><div class="modal" id="modal"></div></div>
 
-  <script src="config.js?v=0.6.0"></script>
-  <script src="app.js?v=0.6.0"></script>
+  <script src="config.js?v=0.7.0"></script>
+  <script src="app.js?v=0.7.0"></script>
 </body>
 </html>
