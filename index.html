@@ -127,6 +127,7 @@
         <a data-page="admins" class="super-only">管理員管理</a>
         <a data-page="takeover" class="super-only">非事務所擁有的檔案</a>
         <a data-page="driveaudit" class="super-only">雲端硬碟檢查</a>
+        <a data-page="companyimport" class="super-only">批次匯入公司</a>
         <a data-page="audit" class="super-only">稽核紀錄</a>
         <a data-page="settings" class="super-only">系統設定</a>
       </nav>
@@ -191,6 +192,21 @@
           <div class="card"><div id="takeBox">載入中…</div></div>
         </section>
 
+        <section id="page-companyimport" class="hidden">
+          <h1>批次匯入公司</h1>
+          <p class="muted">貼上客戶清單，每行一家，欄位依序為「統編、公司全名、簡稱」（Tab 或逗號分隔，可直接從 Excel 複製）。先按「預覽」確認，再按「開始匯入」：系統會建立「統編_簡稱」資料夾、新增公司並綁定。已登記的公司會略過，可重複執行。</p>
+          <div class="card">
+            <textarea id="impText" rows="8" style="width:100%" placeholder="60220	燦睿國際有限公司	燦睿國際"></textarea>
+            <div class="toolbar">
+              <input type="text" id="impParent" placeholder="上層資料夾網址（留空＝與現有公司資料夾同一層）" style="min-width:320px">
+              <input type="number" id="impLimit" min="0" placeholder="只處理前 N 家（試跑用）" style="width:190px">
+              <button id="impPreview" class="btn secondary">預覽</button>
+              <button id="impRun" class="btn" disabled>開始匯入</button>
+            </div>
+            <div id="impBox" class="muted">請貼上清單後按「預覽」。</div>
+          </div>
+        </section>
+
         <section id="page-driveaudit" class="hidden">
           <h1>雲端硬碟檢查</h1>
           <p class="muted">比對公司資料夾與待分類資料夾「雲端實際分享給誰」和「系統記錄應該分享給誰」，並找出擁有者不是系統帳號的檔案（例如客戶自己上傳的）。按「開始檢查」只查詢、不會更動任何東西；有問題的項目要逐項按鈕才會修正，修正都會寫入稽核紀錄。</p>
@@ -235,7 +251,7 @@
 
   <div id="overlay" class="overlay hidden"><div class="modal" id="modal"></div></div>
 
-  <script src="config.js?v=0.7.4"></script>
-  <script src="app.js?v=0.7.4"></script>
+  <script src="config.js?v=0.7.5"></script>
+  <script src="app.js?v=0.7.5"></script>
 </body>
 </html>

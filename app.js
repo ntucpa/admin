@@ -53,7 +53,7 @@
   }
 
   /** 只讀取、不寫入的動作：遇到 Google 連線錯誤時可安全地自動重試 */
-  var READ_ONLY = { ping: 1, loginUrl: 1, getHome: 1, getSettings: 1, listCompanies: 1, getUnclassifiedFolder: 1, listAdmins: 1, checkEmail: 1, listBindings: 1, listCustomers: 1, customerHistory: 1, listInvites: 1, listUnclassified: 1, listExceptions: 1, takeoverReport: 1, listAudit: 1, driveAudit: 1 };
+  var READ_ONLY = { ping: 1, loginUrl: 1, getHome: 1, getSettings: 1, listCompanies: 1, getUnclassifiedFolder: 1, listAdmins: 1, checkEmail: 1, listBindings: 1, listCustomers: 1, customerHistory: 1, listInvites: 1, listUnclassified: 1, listExceptions: 1, takeoverReport: 1, listAudit: 1, driveAudit: 1, previewCompanyImport: 1 };
   var NET_ERR = 'Google 連線暫時不穩，請稍後再試一次。若是儲存或新增，請先重新整理頁面確認是否已完成，避免重複操作。';
 
   function once(name, args, t0) {
@@ -741,6 +741,54 @@
       box.appendChild(t2);
     }, function (err) { $('takeBox').textContent = err.message; });
   }
+
+  /* ---------- 批次匯入公司（僅超級管理員） ---------- */
+  var IMP_STATE = { NEW: '將建立', EXISTS: '已登記，略過', ERROR: '有問題' };
+  var IMP_RESULT = { CREATED: '已建立', SKIPPED: '略過', ERROR: '失敗', PENDING: '尚未處理' };
+
+  function impRows() {
+    return $('impText').value.split(/\r?\n/).map(function (line) {
+      var p = line.split(/\t|,/).map(function (x) { return x.trim(); });
+      return { companyId: p[0] || '', fullName: p[1] || '', name: p[2] || '' };
+    }).filter(function (r) { return r.companyId || r.fullName || r.name; }).filter(function (r) { return !/^(統編|id)$/i.test(r.companyId); });
+  }
+  function impArgs() { return { rows: impRows(), parent: $('impParent').value.trim(), limit: Number($('impLimit').value) || 0 }; }
+
+  function impTable(heads, rows) {
+    var t = el('table'); var h = el('tr');
+    heads.forEach(function (x) { h.appendChild(el('th', {}, x)); }); t.appendChild(h);
+    rows.forEach(function (r) { var tr = el('tr'); r.forEach(function (c) { tr.appendChild(el('td', {}, c)); }); t.appendChild(tr); });
+    return t;
+  }
+
+  function previewImport() {
+    var box = $('impBox'); $('impRun').disabled = true;
+    if (!impRows().length) { box.textContent = '請先貼上清單。'; return; }
+    box.textContent = '檢查中…';
+    call('previewCompanyImport', impArgs(), function (d) {
+      box.innerHTML = '';
+      box.appendChild(el('div', {}, '資料夾將建立在：' + d.parentName + '。共 ' + d.counts.total + ' 筆：將建立 ' + d.counts.create + '、已登記略過 ' + d.counts.exists + '、有問題 ' + d.counts.error + '。'));
+      if (d.parentSharedWith > 0) box.appendChild(el('div', { class: 'error' }, '注意：上層資料夾「' + d.parentName + '」有分享給其他人（' + d.parentSharedWith + ' 位），新資料夾會繼承那些人的存取權。請先確認。'));
+      box.appendChild(impTable(['統編', '全名', '簡稱', '資料夾', '狀態'], d.items.map(function (i) {
+        return [i.companyId, i.fullName, i.name, i.folder ? i.folder + (i.reuse ? '（沿用既有）' : '') : '', (IMP_STATE[i.state] || i.state) + (i.reason && i.state === 'ERROR' ? '：' + i.reason : '')];
+      })));
+      $('impRun').disabled = d.counts.create === 0;
+    }, function (err) { box.textContent = err.message; });
+  }
+
+  function runImport() {
+    var args = impArgs();
+    if (!confirm('確定開始匯入？系統會建立資料夾並新增公司（' + (args.limit ? '只處理前 ' + args.limit + ' 家' : '全部') + '）。')) return;
+    var box = $('impBox'); $('impRun').disabled = true;
+    box.textContent = '匯入中，請勿關閉頁面…（每家約數秒，單次最多約 4 分鐘；若顯示尚未處理，再按一次即可繼續）';
+    call('importCompanies', args, function (d) {
+      box.innerHTML = '';
+      box.appendChild(el('div', {}, '完成：建立 ' + d.created + '、略過 ' + d.skipped + '、失敗 ' + d.errors + '、尚未處理 ' + d.pending + '。'));
+      box.appendChild(impTable(['統編', '簡稱', '結果', '說明'], d.results.map(function (r) { return [r.companyId, r.name, IMP_RESULT[r.result] || r.result, r.message || '']; })));
+    }, function (err) { box.textContent = err.message; });
+  }
+  $('impPreview').onclick = previewImport;
+  $('impRun').onclick = runImport;
 
   /* ---------- 雲端硬碟檢查（僅超級管理員） ---------- */
   var DA_KIND = { EXTRA: '多餘的分享', ROLE_HIGH: '權限過高', OPEN_LINK: '連結公開', MISSING: '應有但雲端沒有' };
