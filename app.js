@@ -1,4 +1,4 @@
-/* 永承事務所管理系統｜管理後台（GitHub Pages）
+﻿/* 永承事務所管理系統｜管理後台（GitHub Pages）
  * 規格 V4.0.3 3.1：以 fetch POST（text/plain JSON）呼叫 Apps Script AdminApi；所有授權檢查在後端。
  * 所有畫面文字以 textContent 輸出，不使用 innerHTML 插入資料。 */
 (function () {
@@ -53,7 +53,7 @@
   }
 
   /** 只讀取、不寫入的動作：遇到 Google 連線錯誤時可安全地自動重試 */
-  var READ_ONLY = { ping: 1, loginUrl: 1, getHome: 1, getSettings: 1, listCompanies: 1, getUnclassifiedFolder: 1, listAdmins: 1, checkEmail: 1, listBindings: 1, listCustomers: 1, customerHistory: 1, listInvites: 1, listUnclassified: 1, listExceptions: 1, takeoverReport: 1, listAudit: 1 };
+  var READ_ONLY = { ping: 1, loginUrl: 1, getHome: 1, getSettings: 1, listCompanies: 1, getUnclassifiedFolder: 1, listAdmins: 1, checkEmail: 1, listBindings: 1, listCustomers: 1, customerHistory: 1, listInvites: 1, listUnclassified: 1, listExceptions: 1, takeoverReport: 1, listAudit: 1, driveAudit: 1 };
   var NET_ERR = 'Google 連線暫時不穩，請稍後再試一次。若是儲存或新增，請先重新整理頁面確認是否已完成，避免重複操作。';
 
   function once(name, args, t0) {
@@ -741,6 +741,77 @@
       box.appendChild(t2);
     }, function (err) { $('takeBox').textContent = err.message; });
   }
+
+  /* ---------- 雲端硬碟檢查（僅超級管理員） ---------- */
+  var DA_KIND = { EXTRA: '多餘的分享', ROLE_HIGH: '權限過高', OPEN_LINK: '連結公開', MISSING: '應有但雲端沒有' };
+  var DA_ROLE = { reader: '檢視者', commenter: '留言者', writer: '編輯者', fileOrganizer: '內容管理員', organizer: '管理員' };
+
+  function runDriveAudit() {
+    var box = $('driveAuditBox');
+    box.textContent = '檢查中（需逐一查詢 Google 雲端硬碟，可能要一分鐘左右，請勿關閉頁面）…';
+    call('driveAudit', {}, function (d) {
+      box.innerHTML = '';
+      box.appendChild(el('div', { class: 'muted' }, '已檢查 ' + d.checkedFolders + ' 個資料夾，時間 ' + fmtTime(d.checkedAt)));
+      d.errors.forEach(function (m) { box.appendChild(el('div', { class: 'error' }, m)); });
+      box.appendChild(el('div', { class: 'card-title', style: 'margin-top:12px' }, '分享對象與系統記錄不符（' + d.issues.length + '）'));
+      if (!d.issues.length) box.appendChild(el('div', { class: 'muted' }, '全部相符。'));
+      else {
+        var t = el('table');
+        var h = el('tr'); ['資料夾', '對象', '問題', '雲端現況', '系統記錄應為', '操作'].forEach(function (x) { h.appendChild(el('th', {}, x)); }); t.appendChild(h);
+        d.issues.forEach(function (i) {
+          var tr = el('tr');
+          tr.appendChild(el('td', {}, i.folderName));
+          tr.appendChild(el('td', {}, i.who));
+          tr.appendChild(el('td', {}, DA_KIND[i.kind] || i.kind));
+          tr.appendChild(el('td', {}, DA_ROLE[i.role] || i.role || '—'));
+          tr.appendChild(el('td', {}, DA_ROLE[i.expected] || i.expected || '無'));
+          var op = el('td');
+          if (i.kind === 'EXTRA' || i.kind === 'OPEN_LINK') {
+            var b = el('button', { class: 'btn small' }, '移除分享');
+            b.onclick = function () {
+              if (confirm('確定移除「' + i.who + '」對「' + i.folderName + '」的分享？\n移除後對方就無法再開啟此資料夾。')) fixDriveAudit({ kind: 'REMOVE_PERMISSION', folderId: i.folderId, permissionId: i.permissionId });
+            };
+            op.appendChild(b);
+          } else if (i.kind === 'ROLE_HIGH') {
+            var b2 = el('button', { class: 'btn small' }, '降為' + (DA_ROLE[i.expected] || i.expected));
+            b2.onclick = function () { fixDriveAudit({ kind: 'SET_ROLE', folderId: i.folderId, permissionId: i.permissionId }); };
+            op.appendChild(b2);
+          } else op.appendChild(el('span', { class: 'muted' }, '等背景同步，或到客戶管理按「重試」'));
+          tr.appendChild(op); t.appendChild(tr);
+        });
+        box.appendChild(t);
+      }
+      box.appendChild(el('div', { class: 'card-title', style: 'margin-top:16px' }, '擁有者不是系統帳號的檔案（' + d.foreign.length + (d.foreignPartial ? '，僅列前 ' + d.foreign.length + ' 筆' : '') + '）'));
+      box.appendChild(el('div', { class: 'muted' }, '管理員擁有的檔案請到「非事務所擁有的檔案」頁處理；這裡是客戶或其他人擁有的檔案。'));
+      if (!d.foreign.length) box.appendChild(el('div', { class: 'muted' }, '沒有。'));
+      else {
+        var t2 = el('table');
+        var h2 = el('tr'); ['檔名', '所在', '擁有者', '操作'].forEach(function (x) { h2.appendChild(el('th', {}, x)); }); t2.appendChild(h2);
+        d.foreign.forEach(function (f) {
+          var tr = el('tr');
+          tr.appendChild(el('td', {}, f.name + (f.isFolder ? '（資料夾）' : '')));
+          tr.appendChild(el('td', {}, f.where));
+          tr.appendChild(el('td', {}, f.owner));
+          var op = el('td');
+          if (f.isFolder) op.appendChild(el('span', { class: 'muted' }, '請在雲端硬碟手動處理'));
+          else {
+            var b3 = el('button', { class: 'btn small' }, '改為系統帳號擁有');
+            b3.onclick = function () {
+              if (confirm('把「' + f.name + '」複製為系統帳號擁有的同名檔案，並把原檔移出？\n原檔的版本紀錄與留言不保留。')) fixDriveAudit({ kind: 'FOREIGN_FILE', fileId: f.fileId });
+            };
+            op.appendChild(b3);
+          }
+          tr.appendChild(op); t2.appendChild(tr);
+        });
+        box.appendChild(t2);
+      }
+    }, function (err) { box.textContent = err.message; });
+  }
+
+  function fixDriveAudit(args) {
+    call('driveAuditFix', args, function (r) { alert(r.message || '完成'); runDriveAudit(); });
+  }
+  $('driveAuditRun').onclick = runDriveAudit;
 
   /* ---------- 稽核紀錄（僅超級管理員） ---------- */
   var auditOffset = 0;

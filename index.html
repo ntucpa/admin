@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-Hant">
 <head>
   <meta charset="utf-8">
@@ -126,6 +126,7 @@
         <div class="sec super-only">系統</div>
         <a data-page="admins" class="super-only">管理員管理</a>
         <a data-page="takeover" class="super-only">非事務所擁有的檔案</a>
+        <a data-page="driveaudit" class="super-only">雲端硬碟檢查</a>
         <a data-page="audit" class="super-only">稽核紀錄</a>
         <a data-page="settings" class="super-only">系統設定</a>
       </nav>
@@ -190,6 +191,13 @@
           <div class="card"><div id="takeBox">載入中…</div></div>
         </section>
 
+        <section id="page-driveaudit" class="hidden">
+          <h1>雲端硬碟檢查</h1>
+          <p class="muted">比對公司資料夾與待分類資料夾「雲端實際分享給誰」和「系統記錄應該分享給誰」，並找出擁有者不是系統帳號的檔案（例如客戶自己上傳的）。按「開始檢查」只查詢、不會更動任何東西；有問題的項目要逐項按鈕才會修正，修正都會寫入稽核紀錄。</p>
+          <div class="toolbar"><button id="driveAuditRun" class="btn">開始檢查</button></div>
+          <div class="card"><div id="driveAuditBox">請按「開始檢查」。</div></div>
+        </section>
+
         <section id="page-audit" class="hidden">
           <h1>稽核紀錄</h1>
           <div class="toolbar">
@@ -227,7 +235,7 @@
 
   <div id="overlay" class="overlay hidden"><div class="modal" id="modal"></div></div>
 
-  <script src="config.js?v=0.7.3"></script>
-  <script src="app.js?v=0.7.3"></script>
+  <script src="config.js?v=0.7.4"></script>
+  <script src="app.js?v=0.7.4"></script>
 </body>
 </html>
