@@ -251,7 +251,7 @@
       d.companies.forEach(function (c) {
         var tr = el('tr');
         tr.appendChild(el('td', {}, c.companyId));
-        tr.appendChild(el('td', {}, c.name));
+        tr.appendChild(el('td', {}, c.name + (c.fullName ? '（' + c.fullName + '）' : '')));
         var st = el('td'); st.appendChild(c.status === 'ACTIVE' ? badge('啟用', 'ok') : badge('停用', 'off')); tr.appendChild(st);
         var fd = el('td'); fd.appendChild(folderLink(c.folderId)); tr.appendChild(fd);
         var op = el('td');
@@ -272,21 +272,26 @@
   $('addCompanyBtn').onclick = function () {
     var m = openModal('新增公司');
     var id = field(m, '統一編號（8 碼）', el('input', { type: 'text', maxlength: '8', inputmode: 'numeric' }), '建立後不可修改，請仔細核對。');
-    var name = field(m, '公司全名', el('input', { type: 'text' }), '與客戶主檔一致，會用於檔名與客戶畫面。');
+    var name = field(m, '公司簡稱（用於檔名）', el('input', { type: 'text' }), '會用在檔名，建議簡短，例如：佳軒。');
+    var fullName = field(m, '公司全名（客戶綁定時顯示，可不填）', el('input', { type: 'text' }), '例如：佳軒管理顧問有限公司。不填時客戶會看到簡稱。');
     var folder = field(m, '公司資料夾網址（可稍後設定）', el('input', { type: 'text', placeholder: 'https://drive.google.com/drive/folders/…' }));
     modalActions(m, '建立', function (fail) {
-      call('createCompany', { companyId: id.value.trim(), name: name.value, folder: folder.value.trim() },
+      call('createCompany', { companyId: id.value.trim(), name: name.value, fullName: fullName.value, folder: folder.value.trim() },
         function () { closeModal(); loadCompanies(); }, function (e) { fail(e.message); });
     });
   };
 
   function renameCompanyDialog(c) {
     var m = openModal('修改公司名稱');
-    m.appendChild(el('div', { class: 'muted', style: 'margin-bottom:8px' }, '統一編號 ' + c.companyId + '。改名不會回溯修改已歸檔的檔名。'));
-    var name = field(m, '公司全名', el('input', { type: 'text' }));
+    m.appendChild(el('div', { class: 'muted', style: 'margin-bottom:8px' }, '統一編號 ' + c.companyId + '。簡稱用於檔名，改名不會回溯修改已歸檔的檔名；全名只顯示給客戶看。'));
+    var name = field(m, '公司簡稱（用於檔名）', el('input', { type: 'text' }));
     name.value = c.name;
+    var fullName = field(m, '公司全名（客戶綁定時顯示，可不填）', el('input', { type: 'text' }));
+    fullName.value = c.fullName || '';
     modalActions(m, '儲存', function (fail) {
-      call('renameCompany', { companyId: c.companyId, name: name.value }, function () { closeModal(); loadCompanies(); }, function (e) { fail(e.message); });
+      call('renameCompany', { companyId: c.companyId, name: name.value }, function () {
+        call('setCompanyFullName', { companyId: c.companyId, fullName: fullName.value }, function () { closeModal(); loadCompanies(); }, function (e) { fail(e.message); });
+      }, function (e) { fail(e.message); });
     });
   }
 
