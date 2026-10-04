@@ -176,6 +176,17 @@
     $('statPendingValue').textContent = pend || 0;
     $('statPendingValue').className = 'value' + (pend ? ' warn' : '');
     setNavPending(pend);
+    var lu = home.lineUsage;
+    $('statLine').classList.toggle('hidden', !lu);
+    if (lu) {
+      if (!lu.ok) { $('statLineValue').textContent = '—'; $('statLineValue').className = 'value'; $('statLineNote').textContent = lu.message; }
+      else {
+        var lp = lu.limit ? Math.round(lu.used / lu.limit * 100) : 0;
+        $('statLineValue').textContent = lu.used + (lu.limit ? ' ／ ' + lu.limit + ' 則' : ' 則（無上限）');
+        $('statLineValue').className = 'value' + (lu.limit && lp >= 100 ? ' err' : lu.limit && lp >= 80 ? ' warn' : '');
+        $('statLineNote').textContent = (lu.limit && lp >= 80 ? '已達上限的 ' + lp + '%｜' : '') + '只計系統主動推送（失敗與重新綁定通知）；回覆客戶不計入';
+      }
+    }
     var cn = home.counts;
     if (cn) {
       $('statUncValue').textContent = cn.unclassified.files + ' 份';
