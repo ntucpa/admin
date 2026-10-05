@@ -192,7 +192,7 @@
     if (ik) {
       $('statIntakeValue').textContent = ik.enabled ? ik.files + ' 份' : '尚未啟用';
       $('statIntakeValue').className = 'value' + (ik.files ? ' warn' : '');
-      $('statIntakeNote').textContent = ik.enabled ? (ik.months ? ik.months + ' 家公司月份待處理' + (ik.review ? '｜' + ik.review + ' 份需人工確認' : '') : '目前沒有待處理的客戶上傳文件') + (ik.ghPercent >= 70 ? '｜⚠ GitHub 用量約 ' + ik.ghPercent + '%' : '') : '點此啟用';
+      $('statIntakeNote').textContent = ik.enabled ? (ik.months ? ik.months + ' 家公司月份待處理' + (ik.reopened ? '｜' + ik.reopened + ' 家已處理後又有新檔案' : '') + (ik.review ? '｜' + ik.review + ' 份需人工確認' : '') : '目前沒有待處理的客戶上傳文件') + (ik.ghPercent >= 70 ? '｜⚠ GitHub 用量約 ' + ik.ghPercent + '%' : '') : '點此啟用';
       setNavCount('navIntake', ik.months);
     }
     var cn = home.counts;
@@ -820,7 +820,9 @@
       d.items.forEach(function (i) {
         var tr = el('tr');
         var recent = i.lastReceivedAt && (Date.now() - new Date(i.lastReceivedAt).getTime()) < 3 * 60000;
-        tr.appendChild(el('td', {}, i.company)); tr.appendChild(el('td', {}, i.month)); tr.appendChild(el('td', {}, String(i.files)));
+        var tdc = el('td', {}, i.company);
+        if (i.addedAfterDone) tdc.appendChild(el('div', { style: 'color:#1d4ed8;font-weight:600;font-size:12px' }, '已處理後又新增 ' + i.addedAfterDone + ' 份'));
+        tr.appendChild(tdc); tr.appendChild(el('td', {}, i.month)); tr.appendChild(el('td', {}, String(i.files)));
         var st = el('td', {}, i.processed + ' ／ ' + i.files);
         if (i.unprocessed) st.appendChild(el('div', { class: 'warn' }, '尚有 ' + i.unprocessed + ' 份未處理'));
         tr.appendChild(st);
