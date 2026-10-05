@@ -192,7 +192,7 @@
     if (ik) {
       $('statIntakeValue').textContent = ik.enabled ? ik.files + ' 份' : '尚未啟用';
       $('statIntakeValue').className = 'value' + (ik.files ? ' warn' : '');
-      $('statIntakeNote').textContent = ik.enabled ? (ik.months ? ik.months + ' 家公司月份待處理' + (ik.review ? '｜' + ik.review + ' 份需人工確認' : '') : '目前沒有待處理的客戶上傳文件') : '點此啟用';
+      $('statIntakeNote').textContent = ik.enabled ? (ik.months ? ik.months + ' 家公司月份待處理' + (ik.review ? '｜' + ik.review + ' 份需人工確認' : '') : '目前沒有待處理的客戶上傳文件') + (ik.ghPercent >= 70 ? '｜⚠ GitHub 用量約 ' + ik.ghPercent + '%' : '') : '點此啟用';
       setNavCount('navIntake', ik.months);
     }
     var cn = home.counts;
@@ -807,6 +807,12 @@
       box.innerHTML = '';
       if (!d.enabled) { box.appendChild(el('div', { class: 'muted' }, '尚未啟用。按上方「啟用客戶上傳文件」，系統會在雲端硬碟建立「客戶上傳文件」資料夾（與「客戶資料」同一層、不分享給任何人），之後客戶傳來的檔案都會存到這裡。')); return; }
       if (d.rootUrl) { var a = el('a', { href: d.rootUrl, target: '_blank', rel: 'noopener' }, '開啟「客戶上傳文件」總資料夾'); var p = el('div', { style: 'margin-bottom:10px' }); p.appendChild(a); box.appendChild(p); }
+      if (d.usage) {
+        var u = d.usage;
+        box.appendChild(el('div', { class: u.percent >= 70 ? 'warn' : 'muted', style: 'margin-bottom:10px' },
+          '雲端切邊轉正（GitHub）本月預估用量：約 ' + u.estMinutes + ' ／ ' + u.limit + ' 分鐘（' + u.percent + '%）｜檢查 ' + u.checks + ' 次、處理 ' + u.runs + ' 次' +
+          (u.percent >= 70 ? '　⚠ 接近免費額度，請到 GitHub 的 Settings → Billing 確認實際用量' : '')));
+      }
       if (!d.items.length) { box.appendChild(el('div', { class: 'muted' }, '目前沒有待處理的客戶上傳文件。')); return; }
       var t = el('table'); var h = el('tr');
       ['公司', '月份', '檔案數', '已自動後製', '需人工確認', '最近收到', '操作'].forEach(function (x) { h.appendChild(el('th', {}, x)); }); t.appendChild(h);
