@@ -813,19 +813,34 @@
           '雲端切邊轉正（GitHub）本月預估用量：約 ' + u.estMinutes + ' ／ ' + u.limit + ' 分鐘（' + u.percent + '%）｜檢查 ' + u.checks + ' 次、處理 ' + u.runs + ' 次' +
           (u.percent >= 70 ? '　⚠ 接近免費額度，請到 GitHub 的 Settings → Billing 確認實際用量' : '')));
       }
+      if (d.queued) box.appendChild(el('div', { class: 'warn', style: 'margin-bottom:10px' }, '⚠ 目前還有 ' + d.queued + ' 張照片正在傳送或整理中，尚未進資料夾；下方數字可能還會增加。'));
       if (!d.items.length) { box.appendChild(el('div', { class: 'muted' }, '目前沒有待處理的客戶上傳文件。')); return; }
       var t = el('table'); var h = el('tr');
       ['公司', '月份', '檔案數', '已自動後製', '需人工確認', '最近收到', '操作'].forEach(function (x) { h.appendChild(el('th', {}, x)); }); t.appendChild(h);
       d.items.forEach(function (i) {
         var tr = el('tr');
+        var recent = i.lastReceivedAt && (Date.now() - new Date(i.lastReceivedAt).getTime()) < 3 * 60000;
         tr.appendChild(el('td', {}, i.company)); tr.appendChild(el('td', {}, i.month)); tr.appendChild(el('td', {}, String(i.files)));
-        tr.appendChild(el('td', {}, i.processed + ' ／ ' + i.files));
+        var st = el('td', {}, i.processed + ' ／ ' + i.files);
+        if (i.unprocessed) st.appendChild(el('div', { class: 'warn' }, '尚有 ' + i.unprocessed + ' 份未處理'));
+        tr.appendChild(st);
         tr.appendChild(el('td', {}, i.review ? String(i.review) : '—'));
-        tr.appendChild(el('td', {}, fmtTime(i.lastReceivedAt)));
+        var rt = el('td', {}, fmtTime(i.lastReceivedAt));
+        if (recent) rt.appendChild(el('div', { class: 'warn' }, '客戶可能還在傳'));
+        tr.appendChild(rt);
         var op = el('td');
         var open = el('a', { class: 'btn small', href: i.url, target: '_blank', rel: 'noopener' }, '開啟資料夾'); op.appendChild(open);
         var b = el('button', { class: 'btn small secondary', style: 'margin-left:6px' }, i.status === 'DONE' ? '改回待處理' : '標記已處理');
-        b.onclick = function () { call('markIntakeDone', { intakeMonthId: i.intakeMonthId, done: i.status !== 'DONE' }, loadIntake); };
+        b.onclick = function () {
+          if (i.status !== 'DONE') {
+            var warns = [];
+            if (i.unprocessed) warns.push('還有 ' + i.unprocessed + ' 份尚未自動處理');
+            if (recent) warns.push('客戶 3 分鐘內還有新檔案進來');
+            if (d.queued) warns.push('系統內還有 ' + d.queued + ' 張照片正在傳送或整理中');
+            if (warns.length && !confirm('確定標記為已處理嗎？\n\n' + warns.join('\n'))) return;
+          }
+          call('markIntakeDone', { intakeMonthId: i.intakeMonthId, done: i.status !== 'DONE' }, loadIntake);
+        };
         op.appendChild(b); tr.appendChild(op); t.appendChild(tr);
       });
       box.appendChild(t);
@@ -836,6 +851,13 @@
   $('intakeSetup').onclick = function () {
     if (!confirm('要在雲端硬碟建立「客戶上傳文件」資料夾並啟用嗎？\n啟用後，客戶傳來的新檔案會存到這裡（客戶看不到），不再放進公司資料夾。')) return;
     call('intakeSetup', {}, function (r) { alert('已啟用：' + r.folderName); loadIntake(); });
+  };
+
+  $('intakeSyncPerms').onclick = function () {
+    if (!confirm('依每位管理員的負責公司，重新授權他們可以打開的「客戶上傳文件」資料夾嗎？\n（超級管理員可打開全部；一般管理員只能打開自己負責的公司。）')) return;
+    call('intakeSyncPerms', {}, function (r) {
+      alert(r.enabled ? '已完成：共 ' + r.folders + ' 個公司資料夾，新增或調整了 ' + r.changed + ' 筆授權。實際授權會由背景處理在幾分鐘內完成。' : '尚未啟用客戶上傳文件。');
+    });
   };
 
   /* ---------- 雲端硬碟檢查（僅超級管理員） ---------- */
