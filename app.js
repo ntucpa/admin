@@ -1,4 +1,4 @@
-﻿/* 永承事務所管理系統｜管理後台（GitHub Pages）
+/* 永承事務所管理系統｜管理後台（GitHub Pages）
  * 規格 V4.0.3 3.1：以 fetch POST（text/plain JSON）呼叫 Apps Script AdminApi；所有授權檢查在後端。
  * 所有畫面文字以 textContent 輸出，不使用 innerHTML 插入資料。 */
 (function () {
@@ -53,7 +53,7 @@
   }
 
   /** 只讀取、不寫入的動作：遇到 Google 連線錯誤時可安全地自動重試 */
-  var READ_ONLY = { ping: 1, loginUrl: 1, getHome: 1, getSettings: 1, listCompanies: 1, getUnclassifiedFolder: 1, listAdmins: 1, checkEmail: 1, listBindings: 1, listCustomers: 1, customerHistory: 1, listInvites: 1, listUnclassified: 1, listExceptions: 1, takeoverReport: 1, listAudit: 1, driveAudit: 1, previewCompanyImport: 1 };
+  var READ_ONLY = { ping: 1, loginUrl: 1, getHome: 1, getSettings: 1, listCompanies: 1, getUnclassifiedFolder: 1, listAdmins: 1, checkEmail: 1, listBindings: 1, listCustomers: 1, customerHistory: 1, listInvites: 1, listUnclassified: 1, listExceptions: 1, takeoverReport: 1, listAudit: 1, driveAudit: 1, previewCompanyImport: 1, listIntake: 1 };
   var NET_ERR = 'Google 連線暫時不穩，請稍後再試一次。若是儲存或新增，請先重新整理頁面確認是否已完成，避免重複操作。';
 
   function once(name, args, t0) {
@@ -187,6 +187,14 @@
         $('statLineNote').textContent = (lu.limit && lp >= 80 ? '已達上限的 ' + lp + '%｜' : '') + '只計系統主動推送（失敗與重新綁定通知）；回覆客戶不計入';
       }
     }
+    var ik = home.intake;
+    $('statIntake').classList.toggle('hidden', !ik);
+    if (ik) {
+      $('statIntakeValue').textContent = ik.enabled ? ik.files + ' 份' : '尚未啟用';
+      $('statIntakeValue').className = 'value' + (ik.files ? ' warn' : '');
+      $('statIntakeNote').textContent = ik.enabled ? (ik.months ? ik.months + ' 家公司月份待處理' + (ik.review ? '｜' + ik.review + ' 份需人工確認' : '') : '目前沒有待處理的客戶上傳文件') : '點此啟用';
+      setNavCount('navIntake', ik.months);
+    }
     var cn = home.counts;
     if (cn) {
       $('statUncValue').textContent = cn.unclassified.files + ' 份';
@@ -231,6 +239,7 @@
     if (page === 'customers') loadCustomers();
     if (page === 'invites') loadInvites();
     if (page === 'unclassified') loadUncReminder();
+    if (page === 'intake') loadIntake();
     if (page === 'exceptions') loadExceptions();
     if (page === 'takeover') loadTakeover();
     if (page === 'audit') loadAudit(false);
@@ -790,6 +799,39 @@
   $('impPreview').onclick = previewImport;
   $('impRun').onclick = runImport;
 
+  /* ---------- 客戶上傳文件（僅超級管理員） ---------- */
+  function loadIntake() {
+    var box = $('intakeBox'); box.textContent = '載入中…';
+    call('listIntake', { includeDone: $('intakeShowDone').checked }, function (d) {
+      $('intakeSetup').classList.toggle('hidden', d.enabled);
+      box.innerHTML = '';
+      if (!d.enabled) { box.appendChild(el('div', { class: 'muted' }, '尚未啟用。按上方「啟用客戶上傳文件」，系統會在雲端硬碟建立「客戶上傳文件」資料夾（與「客戶資料」同一層、不分享給任何人），之後客戶傳來的檔案都會存到這裡。')); return; }
+      if (d.rootUrl) { var a = el('a', { href: d.rootUrl, target: '_blank', rel: 'noopener' }, '開啟「客戶上傳文件」總資料夾'); var p = el('div', { style: 'margin-bottom:10px' }); p.appendChild(a); box.appendChild(p); }
+      if (!d.items.length) { box.appendChild(el('div', { class: 'muted' }, '目前沒有待處理的客戶上傳文件。')); return; }
+      var t = el('table'); var h = el('tr');
+      ['公司', '月份', '檔案數', '已自動後製', '需人工確認', '最近收到', '操作'].forEach(function (x) { h.appendChild(el('th', {}, x)); }); t.appendChild(h);
+      d.items.forEach(function (i) {
+        var tr = el('tr');
+        tr.appendChild(el('td', {}, i.company)); tr.appendChild(el('td', {}, i.month)); tr.appendChild(el('td', {}, String(i.files)));
+        tr.appendChild(el('td', {}, i.processed + ' ／ ' + i.files));
+        tr.appendChild(el('td', {}, i.review ? String(i.review) : '—'));
+        tr.appendChild(el('td', {}, fmtTime(i.lastReceivedAt)));
+        var op = el('td');
+        var open = el('a', { class: 'btn small', href: i.url, target: '_blank', rel: 'noopener' }, '開啟資料夾'); op.appendChild(open);
+        var b = el('button', { class: 'btn small secondary', style: 'margin-left:6px' }, i.status === 'DONE' ? '改回待處理' : '標記已處理');
+        b.onclick = function () { call('markIntakeDone', { intakeMonthId: i.intakeMonthId, done: i.status !== 'DONE' }, loadIntake); };
+        op.appendChild(b); tr.appendChild(op); t.appendChild(tr);
+      });
+      box.appendChild(t);
+    }, function (err) { box.textContent = err.message; });
+  }
+  $('intakeReload').onclick = loadIntake;
+  $('intakeShowDone').onchange = loadIntake;
+  $('intakeSetup').onclick = function () {
+    if (!confirm('要在雲端硬碟建立「客戶上傳文件」資料夾並啟用嗎？\n啟用後，客戶傳來的新檔案會存到這裡（客戶看不到），不再放進公司資料夾。')) return;
+    call('intakeSetup', {}, function (r) { alert('已啟用：' + r.folderName); loadIntake(); });
+  };
+
   /* ---------- 雲端硬碟檢查（僅超級管理員） ---------- */
   var DA_KIND = { EXTRA: '多餘的分享', ROLE_HIGH: '權限過高', OPEN_LINK: '連結公開', MISSING: '應有但雲端沒有' };
   var DA_ROLE = { reader: '檢視者', commenter: '留言者', writer: '編輯者', fileOrganizer: '內容管理員', organizer: '管理員' };
@@ -1310,6 +1352,7 @@
   $('statPending').onclick = function () { go('bindings'); };
   $('statUnc').onclick = function () { go('unclassified'); };
   $('statExc').onclick = function () { go('exceptions'); };
+  $('statIntake').onclick = function () { go('intake'); };
   $('overlay').onclick = function (e) { if (e.target === $('overlay')) closeModal(); };
 
   function enter(notice) {

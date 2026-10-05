@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-Hant">
 <head>
   <meta charset="utf-8">
@@ -122,6 +122,7 @@
         <a data-page="customers">客戶管理</a>
         <a data-page="invites" data-feature="INVITE_MANAGEMENT">邀請管理</a>
         <a data-page="unclassified">未分類提醒<span class="navcount" id="navUnc"></span></a>
+        <a data-page="intake" class="super-only">客戶上傳文件<span class="navcount" id="navIntake"></span></a>
         <a data-page="exceptions" data-feature="EXCEPTION_HANDLING">異常處理<span class="navcount" id="navExc"></span></a>
         <div class="sec super-only">系統</div>
         <a data-page="admins" class="super-only">管理員管理</a>
@@ -138,6 +139,7 @@
             <div class="card stat click" id="statPending"><div class="label">待審核綁定申請</div><div class="value" id="statPendingValue">—</div><div class="muted">點此前往審核</div></div>
             <div class="card stat"><div class="label">今日背景處理用量</div><div class="value" id="statUsage">—</div><div class="muted" id="statUsageNote"></div></div>
             <div class="card stat click" id="statUnc"><div class="label">未分類文件</div><div class="value" id="statUncValue">—</div><div class="muted" id="statUncNote">點此查看</div></div>
+            <div class="card stat click hidden" id="statIntake"><div class="label">待處理客戶上傳文件</div><div class="value" id="statIntakeValue">—</div><div class="muted" id="statIntakeNote">點此查看</div></div>
             <div class="card stat hidden" id="statLine"><div class="label">本月 LINE 訊息用量</div><div class="value" id="statLineValue">—</div><div class="muted" id="statLineNote"></div></div>
             <div class="card stat click" id="statExc"><div class="label">異常清單</div><div class="value" id="statExcValue">—</div><div class="muted">點此處理</div></div>
           </div>
@@ -207,6 +209,17 @@
           </div>
         </section>
 
+        <section id="page-intake" class="hidden">
+          <h1>客戶上傳文件</h1>
+          <p class="muted">客戶從 LINE 傳來的檔案會存在雲端硬碟的「客戶上傳文件」資料夾（客戶看不到），依「公司／月份」整理，雲端會自動切邊轉正。點「開啟資料夾」直接到雲端硬碟；處理完這家這個月的檔案後按「標記已處理」。</p>
+          <div class="toolbar">
+            <label><input type="checkbox" id="intakeShowDone"> 顯示已處理</label>
+            <button id="intakeReload" class="btn secondary">重新整理</button>
+            <button id="intakeSetup" class="btn hidden">啟用客戶上傳文件</button>
+          </div>
+          <div class="card"><div id="intakeBox">載入中…</div></div>
+        </section>
+
         <section id="page-driveaudit" class="hidden">
           <h1>雲端硬碟檢查</h1>
           <p class="muted">比對公司資料夾與待分類資料夾「雲端實際分享給誰」和「系統記錄應該分享給誰」，並找出擁有者不是系統帳號的檔案（例如客戶自己上傳的）。按「開始檢查」只查詢、不會更動任何東西；有問題的項目要逐項按鈕才會修正，修正都會寫入稽核紀錄。</p>
@@ -251,7 +264,7 @@
 
   <div id="overlay" class="overlay hidden"><div class="modal" id="modal"></div></div>
 
-  <script src="config.js?v=0.7.5"></script>
-  <script src="app.js?v=0.7.5"></script>
+  <script src="config.js?v=0.8.0"></script>
+  <script src="app.js?v=0.8.0"></script>
 </body>
 </html>
