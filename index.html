@@ -232,6 +232,27 @@
           <div class="card"><div id="taxBox">載入中…</div></div>
         </section>
 
+        <section id="page-taxup" class="hidden">
+          <h1>上傳請款單 <button id="upBackBtn" class="btn small secondary">回稅務檢核</button></h1>
+          <div id="upStatus"></div>
+          <div id="upDrop" class="card" style="border:2px dashed #98a2b3;text-align:center;padding:28px">
+            把請款明細表 PDF 拖到這裡，或 <button id="upPick" class="btn small">選擇檔案</button>
+            <input type="file" id="upFile" accept="application/pdf,.pdf" multiple class="hidden">
+            <div class="muted" style="margin-top:6px">讀取在您的瀏覽器內進行；按「匯入」後才會存入雲端硬碟並寫入資料庫。</div>
+          </div>
+          <div class="toolbar">
+            <button id="upImportBtn" class="btn" disabled>匯入勾選的 0 份</button>
+            <button id="upClearBtn" class="btn secondary" disabled>清除清單</button>
+            <span id="upProgress" class="muted"></span>
+          </div>
+          <div class="card"><div id="upBox"></div></div>
+        </section>
+
+        <section id="page-taxsettings" class="hidden">
+          <h1>稅務模組設定 <button id="setBackBtn" class="btn small secondary">回稅務檢核</button></h1>
+          <div id="setBox">載入中…</div>
+        </section>
+
         <section id="page-intake" class="hidden">
           <h1>客戶上傳文件</h1>
           <p class="muted">客戶從 LINE 傳來的檔案會存在雲端硬碟的「客戶上傳文件」資料夾（客戶看不到），依「公司／月份」整理，雲端會自動切邊轉正。點「開啟資料夾」直接到雲端硬碟；處理完這家這個月的檔案後按「標記已處理」。</p>
@@ -309,7 +330,8 @@
 
   <div id="overlay" class="overlay hidden"><div class="modal" id="modal"></div></div>
 
-  <script src="config.js?v=0.13.1"></script>
-  <script src="app.js?v=0.13.1"></script>
+  <script src="bill-parser.js?v=0.14.0"></script>
+  <script src="config.js?v=0.14.0"></script>
+  <script src="app.js?v=0.14.0"></script>
 </body>
 </html>

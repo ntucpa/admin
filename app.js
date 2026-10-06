@@ -97,7 +97,7 @@
   }
 
   /** 只讀取、不寫入的動作：遇到 Google 連線錯誤時可安全地自動重試 */
-  var READ_ONLY = { ping: 1, loginUrl: 1, getHome: 1, getSettings: 1, listCompanies: 1, getUnclassifiedFolder: 1, listAdmins: 1, checkEmail: 1, listBindings: 1, listCustomers: 1, customerHistory: 1, listInvites: 1, listUnclassified: 1, listExceptions: 1, takeoverReport: 1, listAudit: 1, driveAudit: 1, previewCompanyImport: 1, listIntake: 1, listBackups: 1, 'tax.getBoard': 1, 'tax.listProfiles': 1 };
+  var READ_ONLY = { ping: 1, loginUrl: 1, getHome: 1, getSettings: 1, listCompanies: 1, getUnclassifiedFolder: 1, listAdmins: 1, checkEmail: 1, listBindings: 1, listCustomers: 1, customerHistory: 1, listInvites: 1, listUnclassified: 1, listExceptions: 1, takeoverReport: 1, listAudit: 1, driveAudit: 1, previewCompanyImport: 1, listIntake: 1, listBackups: 1, 'tax.getBoard': 1, 'tax.listProfiles': 1, 'tax.checkBills': 1, 'tax.getSettings': 1, 'tax.testClassify': 1, 'tax.billsStatus': 1 };
   var NET_ERR = 'Google 連線暫時不穩，請稍後再試一次。若是儲存或新增，請先重新整理頁面確認是否已完成，避免重複操作。';
 
   function post(url, body) {
@@ -295,9 +295,12 @@
   }
 
   function go(page) {
-    document.querySelectorAll('nav a[data-page]').forEach(function (a) { a.classList.toggle('active', a.getAttribute('data-page') === page); });
+    var navPage = (page === 'taxup' || page === 'taxsettings') ? 'tax' : page;
+    document.querySelectorAll('nav a[data-page]').forEach(function (a) { a.classList.toggle('active', a.getAttribute('data-page') === navPage); });
     document.querySelectorAll('main section').forEach(function (s) { s.classList.toggle('hidden', s.id !== 'page-' + page); });
-    document.querySelector('main').style.maxWidth = page === 'tax' ? 'none' : '';
+    document.querySelector('main').style.maxWidth = (page === 'tax' || page === 'taxup' || page === 'taxsettings') ? 'none' : '';
+    if (page === 'taxup') loadUploadPage();
+    if (page === 'taxsettings') loadTaxSettings();
     if (page === 'tax') loadTax();
     if (page === 'home') call('getHome', {}, renderHome);
     if (page === 'companies') loadCompanies();
@@ -1599,6 +1602,8 @@
       }
     }
     var b4 = el('button', { class: 'btn small secondary' }, '客戶資料'); b4.onclick = profilesDialog; bar.appendChild(b4);
+    var bu = el('button', { class: 'btn small' }, '上傳請款單'); bu.onclick = function () { go('taxup'); }; bar.appendChild(bu);
+    if (d.caps.isSuper) { var bs = el('button', { class: 'btn small secondary' }, '模組設定'); bs.onclick = function () { go('taxsettings'); }; bar.appendChild(bs); }
     var b5 = el('button', { class: 'btn small secondary' }, '重新整理'); b5.onclick = function () { loadTax(d.period && d.period.periodId); }; bar.appendChild(b5);
     renderTaxTable();
   }
@@ -1808,6 +1813,269 @@
       });
     }, function (e) { box.textContent = e.message; });
   }
+
+  /* ---------- 上傳請款單（M1 7.1）：瀏覽器讀 PDF → 伺服器檢查 → 預覽 → 存雲端硬碟（Apps Script）→ 寫入資料庫（閘道） ---------- */
+  var PDFJS_BASE = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/';
+  var pdfjsPromise = null;
+  function loadPdfjs() {
+    if (!pdfjsPromise) pdfjsPromise = import(PDFJS_BASE + 'pdf.min.mjs').then(function (m) { m.GlobalWorkerOptions.workerSrc = PDFJS_BASE + 'pdf.worker.min.mjs'; return m; });
+    return pdfjsPromise;
+  }
+  var ups = [], upBusy = false, billsInfo = null;
+
+  function hex(buf) { return Array.prototype.map.call(new Uint8Array(buf), function (b) { return ('0' + b.toString(16)).slice(-2); }).join(''); }
+  function toBase64(buf) {
+    var bytes = new Uint8Array(buf), s = '', i, CH = 0x8000;
+    for (i = 0; i < bytes.length; i += CH) s += String.fromCharCode.apply(null, bytes.subarray(i, i + CH));
+    return btoa(s);
+  }
+  /** 讀一個 PDF：回傳 { hash, buf, parse（bill-parser 結果） } */
+  function readPdfFile(file) {
+    return file.arrayBuffer().then(function (buf) {
+      return Promise.all([crypto.subtle.digest('SHA-256', buf), loadPdfjs()]).then(function (r) {
+        var hash = hex(r[0]);
+        return r[1].getDocument({ data: new Uint8Array(buf.slice(0)), useSystemFonts: true }).promise.then(function (doc) {
+          var pages = [], p = Promise.resolve();
+          for (var n = 1; n <= doc.numPages; n++) (function (num) {
+            p = p.then(function () {
+              return doc.getPage(num).then(function (page) {
+                var vp = page.getViewport({ scale: 1 });
+                return page.getTextContent().then(function (tc) {
+                  pages.push({ items: tc.items.filter(function (i) { return i.str && i.str.trim(); }).map(function (i) { return { str: i.str, x: i.transform[4], y: vp.height - i.transform[5], w: i.width }; }) });
+                });
+              });
+            });
+          })(n);
+          return p.then(function () { return { hash: hash, buf: buf, parse: window.YcBillParser.parseBill(pages) }; });
+        });
+      });
+    });
+  }
+
+  function loadBillsStatus() {
+    call('tax.billsStatus', {}, function (s) { billsInfo = s; renderUpStatus(); }, function (e) { $('upStatus').textContent = e.message; });
+  }
+  function renderUpStatus() {
+    var box = $('upStatus'); box.innerHTML = '';
+    var s = billsInfo; if (!s) return;
+    if (!s.enabled) {
+      var warn = el('div', { class: 'alert' }, '尚未啟用「客戶請款單」資料夾（請款單 PDF 會存在這裡，客戶看不到）。');
+      if (me && me.role === 'SUPER_ADMIN') {
+        var b = el('button', { class: 'btn small', style: 'margin-left:8px' }, '啟用請款單資料夾');
+        b.onclick = function () { if (confirm('將在雲端硬碟「客戶資料」的上一層建立「客戶請款單」資料夾（不分享給客戶），並依負責公司授權管理員。確定啟用？')) call('tax.billsSetup', {}, function () { loadBillsStatus(); }); };
+        warn.appendChild(b);
+      } else warn.appendChild(document.createTextNode('請超級管理員先啟用。'));
+      box.appendChild(warn);
+    } else box.appendChild(el('div', { class: 'muted' }, '存放位置：' + s.folderName + '（每家公司一個子資料夾；客戶沒有權限，每位管理員只有自己負責公司的權限）'));
+    if (s.enabled && !s.hasReceiptKey) box.appendChild(el('div', { class: 'alert' }, '尚未設定「檔案收據金鑰」（Apps Script 指令碼屬性 BILL_RECEIPT_KEY），暫時無法匯入。請聯絡維護人員。'));
+  }
+
+  function upHard(u) { return (u.check.errors || []).filter(function (e) { return !e.overridable && e.code !== 'B5'; }); }
+  function upNeedReplace(u) { return (u.check.errors || []).some(function (e) { return e.code === 'B5'; }); }
+  function upNeedReason(u) { return (u.check.errors || []).some(function (e) { return e.overridable; }); }
+  function upReady(u) {
+    if (!u.check || u.state === 'done') return false;
+    if (upHard(u).length) return false;
+    if (upNeedReplace(u) && !u.replace) return false;
+    if (upNeedReason(u) && (u.reason || '').trim().length < 2) return false;
+    return true;
+  }
+
+  function addUploadFiles(fileList) {
+    var files = Array.prototype.slice.call(fileList).filter(function (f) { return /\.pdf$/i.test(f.name); });
+    if (!files.length) return alert('請選擇 PDF 檔案。');
+    upBusy = true; $('upProgress').textContent = '讀取中…'; updateUpButtons();
+    var added = [], p = Promise.resolve();
+    files.forEach(function (f, i) {
+      p = p.then(function () {
+        $('upProgress').textContent = '讀取 PDF（' + (i + 1) + '／' + files.length + '）…';
+        return readPdfFile(f).then(function (r) {
+          var u = { file: f, name: f.name, hash: r.hash, buf: r.buf, parse: r.parse, include: true, replace: false, reason: '', state: '', check: null };
+          added.push(u); ups.push(u);
+        }, function () {
+          var u = { file: f, name: f.name, hash: '', buf: null, parse: { ok: false, message: '無法讀取這個 PDF（檔案損毀或有密碼）' }, include: false, state: '', check: null };
+          added.push(u); ups.push(u);
+        });
+      });
+    });
+    p.then(function () {
+      var okOnes = added.filter(function (u) { return u.parse.ok; });
+      added.filter(function (u) { return !u.parse.ok; }).forEach(function (u) { u.check = { status: 'PENDING', errors: [{ code: 'PARSE', message: u.parse.message }], warnings: [], items: [] }; u.include = false; });
+      var chunks = []; for (var i = 0; i < okOnes.length; i += 40) chunks.push(okOnes.slice(i, i + 40));
+      function next() {
+        if (!chunks.length) { upBusy = false; $('upProgress').textContent = ''; renderUploads(); return; }
+        var c = chunks.shift();
+        $('upProgress').textContent = '檢查中…';
+        call('tax.checkBills', { files: c.map(function (u) { return { fileName: u.name, fileHash: u.hash, parsed: u.parse.bill }; }) }, function (d) {
+          d.results.forEach(function (r, k) { c[k].check = r; c[k].parse.warnings = c[k].parse.warnings || []; c[k].include = !upHard(c[k]) .length && r.status === 'OK'; });
+          next();
+        }, function (e) { c.forEach(function (u) { u.check = { status: 'PENDING', errors: [{ code: 'CHECK', message: e.message }], warnings: [], items: [] }; u.include = false; }); next(); });
+      }
+      next();
+    });
+  }
+
+  function fmtMoney(n) { return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
+
+  function renderUploads() {
+    var box = $('upBox'); box.innerHTML = '';
+    if (!ups.length) { box.appendChild(el('div', { class: 'muted' }, '把請款明細表 PDF 拖到上方，或按「選擇檔案」。可一次選多個；讀取在您的瀏覽器內進行，確認後才會存檔與寫入。')); updateUpButtons(); return; }
+    var t = el('table'), cg = el('colgroup'); ['34px', '', '120px', '70px', '80px', '110px', ''].forEach(function (w) { cg.appendChild(el('col', w ? { style: 'width:' + w } : {})); }); t.appendChild(cg);
+    var h = el('tr'); ['', '檔案', '公司', '帳期', '合計', '結果', '說明／處理'].forEach(function (x) { h.appendChild(el('th', {}, x)); }); t.appendChild(h);
+    ups.forEach(function (u) {
+      var c = u.check, b = u.parse.ok ? u.parse.bill : null, tr = el('tr');
+      var c0 = el('td'), cb = el('input', { type: 'checkbox' }); cb.checked = !!u.include && u.state !== 'done'; cb.disabled = !c || !!upHard(u).length || u.state === 'done' || upBusy;
+      cb.onchange = function () { u.include = cb.checked; updateUpButtons(); }; c0.appendChild(cb); tr.appendChild(c0);
+      tr.appendChild(el('td', { title: u.name }, u.name.length > 28 ? u.name.slice(0, 27) + '…' : u.name));
+      tr.appendChild(el('td', {}, c && c.companyName ? c.companyName : (b ? b.taxId : '—')));
+      tr.appendChild(el('td', {}, b ? b.billingPeriod : '—'));
+      tr.appendChild(el('td', {}, b ? fmtMoney(b.total) : '—'));
+      var st = el('td');
+      if (u.state === 'done') st.appendChild(badge('已匯入', 'ok'));
+      else if (u.state === 'failed') st.appendChild(badge('匯入失敗', 'err'));
+      else if (!c) st.appendChild(badge('檢查中', 'off'));
+      else if (c.status === 'OK') st.appendChild(badge(c.warnings && c.warnings.length ? '通過（有提醒）' : '通過', 'ok'));
+      else st.appendChild(badge('待確認', 'warn'));
+      tr.appendChild(st);
+      var note = el('td');
+      if (u.msg) note.appendChild(el('div', { class: u.state === 'done' ? 'msg ok' : 'msg err' }, u.msg));
+      if (c) {
+        (c.errors || []).forEach(function (e) { note.appendChild(el('div', { class: 'msg err' }, '✖ ' + e.message)); });
+        (c.warnings || []).concat(u.parse.warnings || []).forEach(function (w) { note.appendChild(el('div', { class: 'muted' }, '⚠ ' + w)); });
+        if (u.state !== 'done' && !upHard(u).length && upNeedReplace(u)) {
+          var lab = el('label', { style: 'display:block;margin-top:4px' }), rc = el('input', { type: 'checkbox' }); rc.checked = !!u.replace;
+          rc.onchange = function () { u.replace = rc.checked; if (u.replace) u.include = true; updateUpButtons(); };
+          lab.appendChild(rc); lab.appendChild(document.createTextNode(' 取代原有請款單' + (c.existingSent ? '（原單已發送，取代後新單需重新發送）' : ''))); note.appendChild(lab);
+        }
+        if (u.state !== 'done' && !upHard(u).length && upNeedReason(u)) {
+          var ri = el('input', { type: 'text', placeholder: '確認無誤仍要匯入：請填原因（會留紀錄）', style: 'margin-top:4px' }); ri.value = u.reason || '';
+          ri.oninput = function () { u.reason = ri.value; updateUpButtons(); }; note.appendChild(ri);
+        }
+        if (c.items && c.items.length) {
+          var det = el('details', { style: 'margin-top:4px' }); det.appendChild(el('summary', { class: 'muted' }, '項目明細（' + c.items.length + ' 項）'));
+          c.items.forEach(function (i) { det.appendChild(el('div', { class: 'muted' }, i.label + '：' + fmtMoney(i.amount) + '　→ ' + i.categoryLabel + (i.periodKey ? '（' + i.periodKey + '）' : ''))); });
+          if (c.storedName) det.appendChild(el('div', { class: 'muted' }, '存檔：' + c.folderName + ' ／ ' + c.storedName));
+          note.appendChild(det);
+        }
+      }
+      tr.appendChild(note); t.appendChild(tr);
+    });
+    box.appendChild(t); updateUpButtons();
+  }
+
+  function updateUpButtons() {
+    var n = ups.filter(function (u) { return u.include && upReady(u); }).length;
+    $('upImportBtn').disabled = upBusy || !n || !(billsInfo && billsInfo.enabled && billsInfo.hasReceiptKey);
+    $('upImportBtn').textContent = '匯入勾選的 ' + n + ' 份';
+    $('upClearBtn').disabled = upBusy || !ups.length;
+  }
+
+  function runImport() {
+    var list = ups.filter(function (u) { return u.include && upReady(u); });
+    if (!list.length) return;
+    if (!confirm('確定匯入 ' + list.length + ' 份請款單？PDF 會存入雲端硬碟「客戶請款單」資料夾。')) return;
+    upBusy = true; updateUpButtons();
+    var ok = 0, fail = 0, i = 0;
+    (function next() {
+      if (i >= list.length) { upBusy = false; $('upProgress').textContent = '完成：成功 ' + ok + ' 份，失敗 ' + fail + ' 份。'; renderUploads(); return; }
+      var u = list[i++]; $('upProgress').textContent = '匯入 ' + i + '／' + list.length + '：' + u.name;
+      var c = u.check, b = u.parse.bill, short = (c.folderName || '').slice(b.taxId.length + 1);
+      call('tax.storeFile', { companyId: b.taxId, storedName: c.storedName, shortName: short, contentBase64: toBase64(u.buf) }, function (s) {
+        call('tax.importBill', { fileName: u.name, parsed: b, receipt: s.receipt, storedName: c.storedName, replace: !!u.replace, override: u.reason && upNeedReason(u) ? { reason: u.reason.trim() } : undefined }, function (r) {
+          u.state = 'done'; u.msg = '已匯入' + (r.linkedPeriods ? '，稅額已帶入 ' + r.linkedPeriods + ' 個期別的檢核列' : '') + (r.needsResend ? '（原單已發送，新單需重新發送）' : ''); u.include = false; ok++; renderUploads(); next();
+        }, function (e) { u.state = 'failed'; u.msg = e.message + '（檔案已存入雲端硬碟，可重新檢查後再匯入，不會重複存檔）'; fail++; renderUploads(); next(); });
+      }, function (e) { u.state = 'failed'; u.msg = e.message; fail++; renderUploads(); next(); });
+    })();
+  }
+
+  (function () {
+    var dz = $('upDrop'), fi = $('upFile');
+    $('upPick').onclick = function () { fi.click(); };
+    fi.onchange = function () { if (fi.files.length) addUploadFiles(fi.files); fi.value = ''; };
+    ['dragenter', 'dragover'].forEach(function (ev) { dz.addEventListener(ev, function (e) { e.preventDefault(); dz.style.background = '#e8eef5'; }); });
+    ['dragleave', 'drop'].forEach(function (ev) { dz.addEventListener(ev, function (e) { e.preventDefault(); dz.style.background = ''; }); });
+    dz.addEventListener('drop', function (e) { if (e.dataTransfer && e.dataTransfer.files.length) addUploadFiles(e.dataTransfer.files); });
+    $('upImportBtn').onclick = runImport;
+    $('upClearBtn').onclick = function () { ups = []; $('upProgress').textContent = ''; renderUploads(); };
+    $('upBackBtn').onclick = function () { go('tax'); };
+  })();
+  function loadUploadPage() { ups = ups.filter(function (u) { return u.state !== 'done'; }); loadBillsStatus(); renderUploads(); }
+
+  /* ---------- 模組設定（僅超級管理員）：檔名範本、請款項目類別、分類規則 ---------- */
+  var setData = null;
+  function loadTaxSettings() {
+    $('setBox').textContent = '載入中…';
+    call('tax.getSettings', {}, function (d) { setData = JSON.parse(JSON.stringify(d)); renderTaxSettings(); }, function (e) { $('setBox').textContent = e.message; });
+  }
+  function renderTaxSettings() {
+    var d = setData, box = $('setBox'); box.innerHTML = '';
+    if (!d.canWrite) box.appendChild(el('div', { class: 'alert' }, '系統同步異常，目前只能查看，不能儲存。'));
+
+    var c1 = el('div', { class: 'card' }); c1.appendChild(el('div', { class: 'card-title' }, '檔名範本（存進雲端硬碟時的檔名）'));
+    var tb = el('input', { type: 'text' }); tb.value = d.templates.bill; tb.oninput = function () { d.templates.bill = tb.value; };
+    var ts = el('input', { type: 'text' }); ts.value = d.templates.slip; ts.oninput = function () { d.templates.slip = ts.value; };
+    field(c1, '請款單', tb, '可用欄位：{公司全名} {簡稱} {統編} {帳期} {期別}；只影響之後新存的檔案，舊檔案不改名。');
+    field(c1, '繳款書（日後使用）', ts);
+    box.appendChild(c1);
+
+    var c2 = el('div', { class: 'card' }); c2.appendChild(el('div', { class: 'card-title' }, '請款項目類別'));
+    c2.appendChild(el('div', { class: 'muted' }, '「稅金」欄填稅別代碼（例如 VAT、PREPAY）表示這類項目是稅金；非稅金留空。「其他費用」必須保留（找不到規則時的預設）。停用的類別不會再被新匯入歸入。'));
+    var t2 = el('table'), cg2 = el('colgroup'); ['130px', '', '110px', '70px', '60px'].forEach(function (w) { cg2.appendChild(el('col', w ? { style: 'width:' + w } : {})); }); t2.appendChild(cg2);
+    var h2 = el('tr'); ['代碼', '名稱', '稅金（稅別代碼）', '停用', ''].forEach(function (x) { h2.appendChild(el('th', {}, x)); }); t2.appendChild(h2);
+    d.categories.forEach(function (c, idx) {
+      var tr = el('tr'), td = function (ch) { var x = el('td'); x.appendChild(ch); tr.appendChild(x); };
+      var code = el('input', { type: 'text' }); code.value = c.code; code.oninput = function () { c.code = code.value.trim().toUpperCase(); };
+      var lab = el('input', { type: 'text' }); lab.value = c.label; lab.oninput = function () { c.label = lab.value; };
+      var tx = el('input', { type: 'text' }); tx.value = c.taxType || ''; tx.oninput = function () { c.taxType = tx.value.trim().toUpperCase(); };
+      var dis = el('input', { type: 'checkbox' }); dis.checked = !!c.disabled; dis.onchange = function () { c.disabled = dis.checked; };
+      var del = el('button', { class: 'linkbtn', style: 'color:#b42318' }, '刪除'); del.onclick = function () { d.categories.splice(idx, 1); renderTaxSettings(); };
+      td(code); td(lab); td(tx); td(dis); td(del); t2.appendChild(tr);
+    });
+    c2.appendChild(t2);
+    var add2 = el('button', { class: 'btn small secondary' }, '新增類別'); add2.onclick = function () { d.categories.push({ code: 'NEW_' + (d.categories.length + 1), label: '新類別', taxType: '' }); renderTaxSettings(); }; c2.appendChild(add2);
+    box.appendChild(c2);
+
+    var c3 = el('div', { class: 'card' }); c3.appendChild(el('div', { class: 'card-title' }, '分類規則（由上而下，第一個符合的生效；都不符合 → 其他費用）'));
+    c3.appendChild(el('div', { class: 'muted' }, '關鍵字用「、」分隔，帳名含其中任何一個就符合。「結算申報費」「申報費」要排在含稅名的規則之前，避免被當成稅金。'));
+    var t3 = el('table'), cg3 = el('colgroup'); ['', '170px', '120px'].forEach(function (w) { cg3.appendChild(el('col', w ? { style: 'width:' + w } : {})); }); t3.appendChild(cg3);
+    var h3 = el('tr'); ['含有關鍵字', '歸入類別', ''].forEach(function (x) { h3.appendChild(el('th', {}, x)); }); t3.appendChild(h3);
+    d.rules.forEach(function (r, idx) {
+      var tr = el('tr'), td = function (ch) { var x = el('td'); x.appendChild(ch); tr.appendChild(x); };
+      var kw = el('input', { type: 'text' }); kw.value = r.contains.join('、'); kw.oninput = function () { r.contains = kw.value.split(/[、,，]/).map(function (s) { return s.trim(); }).filter(Boolean); };
+      var sel = el('select'); d.categories.forEach(function (c) { var o = el('option', { value: c.code }, c.label); if (c.code === r.category) o.selected = true; sel.appendChild(o); });
+      sel.onchange = function () { r.category = sel.value; };
+      var ops = el('div');
+      var up = el('button', { class: 'linkbtn' }, '上移'), dn = el('button', { class: 'linkbtn' }, '下移'), del = el('button', { class: 'linkbtn', style: 'color:#b42318' }, '刪除');
+      up.onclick = function () { if (idx > 0) { d.rules.splice(idx - 1, 0, d.rules.splice(idx, 1)[0]); renderTaxSettings(); } };
+      dn.onclick = function () { if (idx < d.rules.length - 1) { d.rules.splice(idx + 1, 0, d.rules.splice(idx, 1)[0]); renderTaxSettings(); } };
+      del.onclick = function () { d.rules.splice(idx, 1); renderTaxSettings(); };
+      [up, document.createTextNode(' '), dn, document.createTextNode(' '), del].forEach(function (x) { ops.appendChild(x); });
+      td(kw); td(sel); td(ops); t3.appendChild(tr);
+    });
+    c3.appendChild(t3);
+    var add3 = el('button', { class: 'btn small secondary' }, '新增規則'); add3.onclick = function () { d.rules.push({ contains: [''], category: 'OTHER_FEE' }); renderTaxSettings(); }; c3.appendChild(add3);
+    var test = el('div', { class: 'toolbar', style: 'margin-top:12px' });
+    var ti = el('input', { type: 'text', placeholder: '測試：輸入一個帳名（例：07-08月份營業稅）', style: 'max-width:340px' }), tbtn = el('button', { class: 'btn small secondary' }, '測試歸類'), tout = el('span', { class: 'muted' });
+    tbtn.onclick = function () {
+      call('tax.testClassify', { label: ti.value, rules: d.rules.filter(function (r) { return r.contains.length; }), categories: d.categories }, function (r) {
+        tout.textContent = '→ ' + r.categoryLabel + (r.taxType ? '（稅金：' + r.taxType + (r.periodKey ? '，期別 ' + r.periodKey : '，期別尚未建立') + '）' : '');
+      }, function (e) { tout.textContent = e.message; });
+    };
+    test.appendChild(ti); test.appendChild(tbtn); test.appendChild(tout); c3.appendChild(test);
+    box.appendChild(c3);
+
+    var bar = el('div', { class: 'actions' }), msg = el('div', { class: 'msg' });
+    var reset = el('button', { class: 'btn secondary' }, '還原預設'), save = el('button', { class: 'btn' }, '儲存'); save.disabled = !d.canWrite;
+    reset.onclick = function () { if (!confirm('把類別、規則、檔名範本全部改回預設值（尚未儲存前可重新整理取消）？')) return; setData.categories = JSON.parse(JSON.stringify(d.defaults.categories)); setData.rules = JSON.parse(JSON.stringify(d.defaults.rules)); setData.templates = JSON.parse(JSON.stringify(d.defaults.templates)); renderTaxSettings(); };
+    save.onclick = function () {
+      save.disabled = true; msg.className = 'msg'; msg.textContent = '儲存中…';
+      call('tax.saveSettings', { categories: d.categories.map(function (c) { return { code: c.code, label: c.label, taxType: c.taxType || '', disabled: !!c.disabled }; }), rules: d.rules.filter(function (r) { return r.contains.length; }), templateBill: d.templates.bill, templateSlip: d.templates.slip },
+        function () { msg.className = 'msg ok'; msg.textContent = '已儲存，之後新匯入的請款單立即套用。'; save.disabled = false; },
+        function (e) { msg.className = 'msg err'; msg.textContent = e.message; save.disabled = false; });
+    };
+    bar.appendChild(reset); bar.appendChild(save); box.appendChild(msg); box.appendChild(bar);
+  }
+  $('setBackBtn').onclick = function () { go('tax'); };
 
   (function start() {
     // LINE Login 回到本頁：以 code／state 向後端換取登入
