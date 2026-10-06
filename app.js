@@ -203,6 +203,7 @@
       $('statBackupNote').textContent = !bk.enabled ? '點此啟用' :
         ('最近成功：' + (bk.lastOkAt ? fmtTime(bk.lastOkAt) : '—') + (bk.ackOverdue ? '｜⚠ 已 ' + bk.daysSinceAck + ' 天沒下載到地端' : (bk.ackAt ? '｜上次下載到地端：' + fmtTime(bk.ackAt) : '')));
       setNavCount('navBackup', bk.enabled && (bk.lastFailed || bk.ackOverdue) ? '!' : 0);
+      backupReminder(bk);
     }
     var cn = home.counts;
     if (cn) {
@@ -924,7 +925,8 @@
     call('backupNow', {}, function (r) { b.disabled = false; b.textContent = '立即備份一次'; alert((r.failed ? '有失敗：' : '完成：') + r.messages.join('\n')); loadBackup(); },
       function (err) { b.disabled = false; b.textContent = '立即備份一次'; alert(err.message); });
   };
-  $('backupDownload').onclick = function () {
+  $('backupDownload').onclick = runBackupDownload;
+  function runBackupDownload() {
     var b = $('backupDownload'); b.disabled = true; b.textContent = '準備中…（約需 30 秒）';
     var reset = function () { b.disabled = false; b.textContent = '一鍵下載到地端（ZIP）'; };
     call('backupDownload', {}, function (r) {
@@ -939,7 +941,25 @@
       alert('已下載「' + r.name + '」（含 ' + r.included.join('、') + '）。\n請把這個檔案存放在安全的位置（內含客戶資料）。' + (r.skipped.length ? '\n\n注意：以下沒有放進 ZIP：\n' + r.skipped.join('\n') : ''));
       loadBackup();
     }, function (err) { reset(); alert(err.message); });
-  };
+  }
+
+  /** 登入後（每個瀏覽器工作階段一次）：備份逾期或失敗時跳出提醒；只有超級管理員的首頁資料帶有 backup，所以一般管理員不會看到 */
+  function backupReminder(bk) {
+    if (!bk || !bk.enabled || !(bk.ackOverdue || bk.lastFailed)) return;
+    try { if (sessionStorage.getItem('yc_backup_popup')) return; sessionStorage.setItem('yc_backup_popup', '1'); } catch (e) { /* 無法記錄時照常顯示 */ }
+    var ov = el('div', { style: 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px' });
+    var box = el('div', { style: 'background:#fff;color:#1a2433;border-radius:10px;max-width:460px;width:100%;padding:22px;box-shadow:0 10px 40px rgba(0,0,0,.3)' });
+    box.appendChild(el('div', { style: 'font-size:18px;font-weight:700;margin-bottom:10px' }, bk.lastFailed ? '⚠ 系統備份失敗' : '⚠ 該下載系統備份了'));
+    box.appendChild(el('div', { style: 'line-height:1.7;margin-bottom:16px;white-space:pre-line' },
+      (bk.lastFailed ? '最近一次自動備份失敗，請到「備份」頁查看原因，或按「立即備份一次」。' : '') +
+      (bk.ackOverdue ? (bk.lastFailed ? '\n' : '') + '已經 ' + bk.daysSinceAck + ' 天沒有把系統備份下載到地端電腦。這份備份是 Google 帳號出問題時的最後保障，請按下方按鈕下載（約 30 秒，ZIP 內含客戶資料，請存放在安全的位置）。' : '')));
+    var row = el('div', { style: 'display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap' });
+    var later = el('button', { class: 'btn secondary' }, '稍後再說');
+    later.onclick = function () { ov.remove(); };
+    var go2 = el('button', { class: 'btn' }, bk.ackOverdue ? '立即下載' : '前往備份頁');
+    go2.onclick = function () { ov.remove(); go('backup'); if (bk.ackOverdue) setTimeout(runBackupDownload, 400); };
+    row.appendChild(later); row.appendChild(go2); box.appendChild(row); ov.appendChild(box); document.body.appendChild(ov);
+  }
   $('backupRestoreGo').onclick = function () {
     var fileId = $('backupRestoreFile').value, table = $('backupRestoreTable').value, mode = $('backupRestoreMode').value;
     if (!fileId || !table) { alert('請選擇備份與資料表'); return; }
