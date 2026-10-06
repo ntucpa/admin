@@ -121,6 +121,7 @@
         <a data-page="bindings" data-feature="BINDING_APPROVAL">客戶綁定審核<span class="navcount" id="navPending"></span></a>
         <a data-page="customers">客戶管理</a>
         <a data-page="invites" data-feature="INVITE_MANAGEMENT">邀請管理</a>
+        <a data-page="tax" data-feature="TAX_CHECKLIST">稅務檢核</a>
         <a data-page="unclassified">未分類提醒<span class="navcount" id="navUnc"></span></a>
         <a data-page="intake" class="super-only">客戶上傳文件<span class="navcount" id="navIntake"></span></a>
         <a data-page="exceptions" data-feature="EXCEPTION_HANDLING">異常處理<span class="navcount" id="navExc"></span></a>
@@ -211,6 +212,26 @@
           </div>
         </section>
 
+        <section id="page-tax" class="hidden">
+          <h1>稅務檢核（營業稅）</h1>
+          <div id="taxStale" class="alert hidden"></div>
+          <div class="toolbar" id="taxPeriodBar"></div>
+          <div class="toolbar">
+            <input type="text" id="taxSearch" placeholder="搜尋統編、簡稱、公司名稱">
+            <select id="taxFilter" style="width:auto"></select>
+            <button id="taxAddBtn" class="btn small secondary">加入公司</button>
+          </div>
+          <div class="toolbar hidden" id="taxBatch">
+            <span id="taxSelCount" class="muted">已選 0 家</span>
+            <select id="taxStepSel" style="width:auto"><option value="NOTIFIED">已通知</option><option value="DOCS_COMPLETE">發票收齊</option><option value="BOOKED">已入帳</option><option value="FILED">已申報</option></select>
+            <input type="date" id="taxDate" style="width:auto">
+            <button id="taxMarkBtn" class="btn small">標記完成</button>
+            <button id="taxClearBtn" class="btn small secondary">取消標記</button>
+            <button id="taxNaBtn" class="btn small danger">標為不適用</button>
+          </div>
+          <div class="card"><div id="taxBox">載入中…</div></div>
+        </section>
+
         <section id="page-intake" class="hidden">
           <h1>客戶上傳文件</h1>
           <p class="muted">客戶從 LINE 傳來的檔案會存在雲端硬碟的「客戶上傳文件」資料夾（客戶看不到），依「公司／月份」整理，雲端會自動切邊轉正。點「開啟資料夾」直接到雲端硬碟；處理完這家這個月的檔案後按「標記已處理」。</p>
@@ -288,7 +309,7 @@
 
   <div id="overlay" class="overlay hidden"><div class="modal" id="modal"></div></div>
 
-  <script src="config.js?v=0.12.0"></script>
-  <script src="app.js?v=0.12.0"></script>
+  <script src="config.js?v=0.13.0"></script>
+  <script src="app.js?v=0.13.0"></script>
 </body>
 </html>
