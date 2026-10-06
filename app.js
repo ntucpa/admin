@@ -1775,11 +1775,11 @@
       var tools = el('div', { class: 'toolbar' }); m.appendChild(tools);
       var rowsUi = [];
       var t = el('table', { style: 'min-width:840px' }), cg = el('colgroup'); ['34px', '90px', '', '110px', '92px', '100px', '150px'].forEach(function (w) { cg.appendChild(el('col', w ? { style: 'width:' + w } : {})); }); t.appendChild(cg);
-      var h = el('tr'); ['', '統一編號', '公司', '簡稱', '營業稅客戶', '繳納方式', '申報注意事項'].forEach(function (x) { h.appendChild(el('th', {}, x)); }); t.appendChild(h);
+      var h = el('tr'); ['', '統一編號', '公司全名', '簡稱', '營業稅客戶', '繳納方式', '申報注意事項'].forEach(function (x) { h.appendChild(el('th', { style: 'position:sticky;top:0;z-index:2;background:#fff;box-shadow:0 1px 0 var(--line)' }, x)); }); t.appendChild(h);
       pd.profiles.forEach(function (p) {
         var tr = el('tr'), c0 = el('td'), cb = el('input', { type: 'checkbox' }); c0.appendChild(cb); tr.appendChild(c0);
-        tr.appendChild(el('td', {}, p.companyId)); tr.appendChild(el('td', {}, p.companyName));
-        var sn = el('input', { type: 'text', maxlength: '30' }); sn.value = p.shortName; var td3 = el('td'); td3.appendChild(sn); tr.appendChild(td3);
+        tr.appendChild(el('td', {}, p.companyId)); tr.appendChild(el('td', {}, p.fullName || p.companyName));
+        var sn = el('input', { type: 'text', maxlength: '30' }); sn.value = p.shortName || p.companyName; var td3 = el('td'); td3.appendChild(sn); tr.appendChild(td3);
         var vf = el('input', { type: 'checkbox' }); vf.checked = p.vatFiling; var td4 = el('td'); td4.appendChild(vf); tr.appendChild(td4);
         var pm = el('select'); [['AGENT_PAY', '代繳'], ['SELF_PAY', '自繳']].forEach(function (x) { var o = el('option', { value: x[0] }, x[1]); if (p.vatPaymentMethod === x[0]) o.selected = true; pm.appendChild(o); });
         var td5 = el('td'); td5.appendChild(pm); tr.appendChild(td5);
@@ -1798,7 +1798,7 @@
         var items = [];
         rowsUi.forEach(function (u) {
           var p = u.p, it = { companyId: p.companyId };
-          if (u.sn.value.trim() !== p.shortName) it.shortName = u.sn.value.trim();
+          if (u.sn.value.trim() !== (p.shortName || p.companyName)) it.shortName = u.sn.value.trim();
           if (u.vf.checked !== p.vatFiling) it.vatFiling = u.vf.checked;
           if (u.pm.value !== p.vatPaymentMethod) it.vatPaymentMethod = u.pm.value;
           if (u.tn.value.trim() !== p.taxNotes) it.taxNotes = u.tn.value.trim();
