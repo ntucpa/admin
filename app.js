@@ -10,6 +10,15 @@
   var me = null;
   var params = new URLSearchParams(location.search);
 
+  /* ---------- 快速通道（Cloudflare 閘道） ----------
+   * GATEWAY_ACTIONS 內的查詢改送閘道：閘道驗證登入憑證後直接讀 Cloudflare 的資料副本回答（約 0.5 秒）；
+   * 憑證缺少、過期，或副本不可靠時，閘道會自動改問 Apps Script，所以不會比以前更不穩。
+   * 要整個關閉：把 config.js 的 GATEWAY_ACTIONS 改成 {}（或刪掉 GATEWAY_URL）。 */
+  var GATEWAY_URL = window.YC_CONFIG.GATEWAY_URL || '';
+  var GATEWAY_ACTIONS = window.YC_CONFIG.GATEWAY_ACTIONS || {};
+  var JWT_KEY = 'yc_admin_jwt';
+  var jwt = '', jwtExp = 0, jwtPending = null, jwtTimer = null;
+
   /* ---------- 共用 ---------- */
   /** 登入保存於本機（V4.0.4 第七章：個人電腦登入保持數天，由後端控制到期與停用） */
   function store(k, v) { try { if (v) localStorage.setItem(k, v); else localStorage.removeItem(k); sessionStorage.removeItem(k); } catch (e) {} }
@@ -47,6 +56,41 @@
   }
   function hideBusy() { clearTimeout(busyTimer); $('busy').classList.add('hidden'); }
 
+  /** 登入憑證（約 15 分鐘）：只放記憶體與本分頁的 sessionStorage；由 Apps Script 以長效登入換發 */
+  function jwtFresh() { return !!jwt && jwtExp - Date.now() > 90000; }
+  function startJwtTimer() {
+    if (jwtTimer) return;
+    jwtTimer = setInterval(function () { if (token && !jwtFresh()) ensureJwt(); }, 2 * 60000);
+  }
+  function setJwt(a) {
+    if (!a || !a.jwt) return;
+    jwt = a.jwt; jwtExp = a.exp * 1000;
+    try { sessionStorage.setItem(JWT_KEY, JSON.stringify({ jwt: jwt, exp: a.exp })); } catch (e) {}
+    startJwtTimer();
+  }
+  function clearJwt() {
+    jwt = ''; jwtExp = 0; jwtPending = null;
+    if (jwtTimer) { clearInterval(jwtTimer); jwtTimer = null; }
+    try { sessionStorage.removeItem(JWT_KEY); } catch (e) {}
+  }
+  function restoreJwt() {
+    try {
+      var o = JSON.parse(sessionStorage.getItem(JWT_KEY) || 'null');
+      if (o && o.jwt && o.exp * 1000 > Date.now()) { jwt = o.jwt; jwtExp = o.exp * 1000; startJwtTimer(); }
+    } catch (e) { /* 沒有可用的就重新換發 */ }
+  }
+  /** 回傳可用的憑證；換發失敗回傳空字串（請求仍會送出，由閘道改問 Apps Script） */
+  function ensureJwt() {
+    if (jwtFresh()) return Promise.resolve(jwt);
+    if (!token) return Promise.resolve('');
+    if (jwtPending) return jwtPending;
+    jwtPending = fetch(API_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ action: 'auth.issue', typ: 'admin', token: token }) })
+      .then(function (r) { return r.json(); })
+      .then(function (r) { if (r && r.ok) setJwt(r.data); return jwtFresh() ? jwt : ''; }, function () { return ''; })
+      .then(function (j) { jwtPending = null; return j; });
+    return jwtPending;
+  }
+
   /** 暖機：預先喚醒後端，縮短接下來真正操作的等待時間 */
   function warmUp() {
     fetch(API_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ action: 'admin.ping' }) }).then(null, function () {});
@@ -56,18 +100,28 @@
   var READ_ONLY = { ping: 1, loginUrl: 1, getHome: 1, getSettings: 1, listCompanies: 1, getUnclassifiedFolder: 1, listAdmins: 1, checkEmail: 1, listBindings: 1, listCustomers: 1, customerHistory: 1, listInvites: 1, listUnclassified: 1, listExceptions: 1, takeoverReport: 1, listAudit: 1, driveAudit: 1, previewCompanyImport: 1, listIntake: 1, listBackups: 1 };
   var NET_ERR = 'Google 連線暫時不穩，請稍後再試一次。若是儲存或新增，請先重新整理頁面確認是否已完成，避免重複操作。';
 
+  function post(url, body) {
+    return fetch(url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(body) })
+      .then(function (r) {
+        if (!r.ok) throw { code: 'NETWORK', message: NET_ERR };
+        var route = r.headers.get('x-yc-route') || '';
+        return r.json().then(function (j) { j._route = route; return j; }, function () { throw { code: 'NETWORK', message: NET_ERR }; });
+      }, function () { throw { code: 'NETWORK', message: NET_ERR }; });
+  }
+
   function once(name, args, t0) {
-    return fetch(API_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ action: 'admin.' + name, token: token, args: args || {} })
-    }).then(function (r) {
-      if (!r.ok) throw { code: 'NETWORK', message: NET_ERR };
-      return r.json().then(null, function () { throw { code: 'NETWORK', message: NET_ERR }; });
-    }, function () {
-      throw { code: 'NETWORK', message: NET_ERR };
-    }).then(function (r) {
-      $('perf').textContent = '最近一次操作：伺服器處理 ' + ((r.ms || 0) / 1000).toFixed(1) + ' 秒｜總耗時 ' + ((Date.now() - t0) / 1000).toFixed(1) + ' 秒';
+    var action = 'admin.' + name;
+    var direct = function () { return post(API_URL, { action: action, token: token, args: args || {} }); };
+    var p;
+    if (GATEWAY_URL && GATEWAY_ACTIONS[name]) {
+      p = ensureJwt().then(function (j) { return post(GATEWAY_URL, { action: action, token: token, jwt: j, args: args || {} }); })
+        .then(null, function (e) { if (e && e.code === 'NETWORK') return direct(); throw e; }); // 閘道連不上時直接問 Apps Script
+    } else {
+      p = direct();
+    }
+    return p.then(function (r) {
+      var via = r._route === 'cloudflare' ? '｜快速通道（Cloudflare）' : (r._route && r._route.indexOf('fallback') === 0 ? '｜快速通道暫時無法使用，已改由 Apps Script 回答' : '');
+      $('perf').textContent = '最近一次操作：伺服器處理 ' + ((r.ms || 0) / 1000).toFixed(1) + ' 秒｜總耗時 ' + ((Date.now() - t0) / 1000).toFixed(1) + ' 秒' + via;
       if (r.ok) return r.data;
       throw r.error || { code: 'INTERNAL', message: '系統發生錯誤' };
     });
@@ -128,7 +182,7 @@
   var loginPurpose = {};
 
   function showLogin(message, notice) {
-    token = ''; store(TOKEN_KEY, '');
+    token = ''; store(TOKEN_KEY, ''); clearJwt();
     $('appView').classList.add('hidden');
     $('loginView').classList.remove('hidden');
     $('loginError').classList.toggle('hidden', !message);
@@ -1507,12 +1561,13 @@
     // LINE Login 回到本頁：以 code／state 向後端換取登入
     if (params.get('code') || params.get('error')) {
       var args = { code: params.get('code') || '', state: params.get('state') || '', error: params.get('error') || '' };
+      if (GATEWAY_URL && GATEWAY_ACTIONS.getHome) args.noHome = true; // 首頁改走快速通道，登入回應不必再算一次
       cleanUrl();
       showBusy('登入中，請稍候…');
       api('callback', args).then(function (r) {
         hideBusy();
         if (r.sessionToken) {
-          token = r.sessionToken; store(TOKEN_KEY, token);
+          token = r.sessionToken; store(TOKEN_KEY, token); setJwt(r.auth);
           if (r.home) { showApp(r.home); if (r.notice) alert(r.notice); return; }
           return enter(r.notice);
         }
@@ -1524,6 +1579,7 @@
     if (params.get('vae')) { loginPurpose = { vae: params.get('vae') }; cleanUrl(); return showPurposePrompt('vae'); }
     token = load(TOKEN_KEY);
     if (!token) return showLogin('', '');
+    restoreJwt();
     enter('');
   })();
 })();

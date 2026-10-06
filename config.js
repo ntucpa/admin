@@ -1,4 +1,7 @@
 /* 管理後台設定（非機密）：後端 API 網址 = Apps Script 固定部署作業網址 */
 window.YC_CONFIG = {
-  API_URL: 'https://script.google.com/macros/s/AKfycbw8UHSKeRJP2R_ibRVM73K1yuQyDNvkg63RGVQSTPH1XbHRZ-8esWOMiBGricA-TWsHew/exec'
+  API_URL: 'https://script.google.com/macros/s/AKfycbw8UHSKeRJP2R_ibRVM73K1yuQyDNvkg63RGVQSTPH1XbHRZ-8esWOMiBGricA-TWsHew/exec',
+  /* 快速通道：閘道網址與要走閘道的查詢（閘道的路由表決定由 Cloudflare 或 Apps Script 回答）。要停用請改成 GATEWAY_ACTIONS: {} */
+  GATEWAY_URL: 'https://yc-gateway.ntucpa.workers.dev/api',
+  GATEWAY_ACTIONS: { getHome: 1 }
 };
