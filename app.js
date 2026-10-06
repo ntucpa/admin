@@ -880,7 +880,7 @@
       backupData = d;
       $('backupSetup').classList.toggle('hidden', !!d.enabled);
       $('backupNow').classList.toggle('hidden', !d.enabled);
-      $('backupAck').classList.toggle('hidden', !d.enabled);
+      $('backupDownload').classList.toggle('hidden', !d.enabled);
       $('backupRestoreCard').classList.toggle('hidden', !d.enabled);
       box.innerHTML = '';
       if (!d.enabled) { box.appendChild(el('div', { class: 'muted' }, '尚未啟用。按上方「啟用系統備份」，系統會在雲端硬碟建立「系統備份」資料夾（與「客戶資料」同一層、不分享給任何人），之後每天自動備份。')); return; }
@@ -939,10 +939,6 @@
       alert('已下載「' + r.name + '」（含 ' + r.included.join('、') + '）。\n請把這個檔案存放在安全的位置（內含客戶資料）。' + (r.skipped.length ? '\n\n注意：以下沒有放進 ZIP：\n' + r.skipped.join('\n') : ''));
       loadBackup();
     }, function (err) { reset(); alert(err.message); });
-  };
-  $('backupAck').onclick = function () {
-    if (!confirm('確認您已自行把「系統備份」資料夾下載到地端電腦了嗎？')) return;
-    call('backupAck', {}, function () { loadBackup(); });
   };
   $('backupRestoreGo').onclick = function () {
     var fileId = $('backupRestoreFile').value, table = $('backupRestoreTable').value, mode = $('backupRestoreMode').value;
