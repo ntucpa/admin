@@ -924,8 +924,24 @@
     call('backupNow', {}, function (r) { b.disabled = false; b.textContent = '立即備份一次'; alert((r.failed ? '有失敗：' : '完成：') + r.messages.join('\n')); loadBackup(); },
       function (err) { b.disabled = false; b.textContent = '立即備份一次'; alert(err.message); });
   };
+  $('backupDownload').onclick = function () {
+    var b = $('backupDownload'); b.disabled = true; b.textContent = '準備中…（約需 30 秒）';
+    var reset = function () { b.disabled = false; b.textContent = '一鍵下載到地端（ZIP）'; };
+    call('backupDownload', {}, function (r) {
+      try {
+        var bin = atob(r.base64), n = bin.length, bytes = new Uint8Array(n);
+        for (var i = 0; i < n; i++) bytes[i] = bin.charCodeAt(i);
+        var url = URL.createObjectURL(new Blob([bytes], { type: 'application/zip' }));
+        var a = document.createElement('a'); a.href = url; a.download = r.name; document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
+      } catch (e) { reset(); alert('下載失敗：' + e.message); return; }
+      reset();
+      alert('已下載「' + r.name + '」（含 ' + r.included.join('、') + '）。\n請把這個檔案存放在安全的位置（內含客戶資料）。' + (r.skipped.length ? '\n\n注意：以下沒有放進 ZIP：\n' + r.skipped.join('\n') : ''));
+      loadBackup();
+    }, function (err) { reset(); alert(err.message); });
+  };
   $('backupAck').onclick = function () {
-    if (!confirm('確認您已把「系統備份」資料夾下載到地端電腦了嗎？')) return;
+    if (!confirm('確認您已自行把「系統備份」資料夾下載到地端電腦了嗎？')) return;
     call('backupAck', {}, function () { loadBackup(); });
   };
   $('backupRestoreGo').onclick = function () {

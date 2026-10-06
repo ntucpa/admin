@@ -230,7 +230,8 @@
             <button id="backupReload" class="btn secondary">重新整理</button>
             <button id="backupSetup" class="btn hidden">啟用系統備份</button>
             <button id="backupNow" class="btn">立即備份一次</button>
-            <button id="backupAck" class="btn secondary" title="防範 Google 帳號出問題：每月把「系統備份」資料夾下載到地端電腦後，按這裡記錄日期">已下載到地端</button>
+            <button id="backupDownload" class="btn" title="把最新一份的主資料庫、日誌庫、檔案清單打包成 ZIP 下載到這台電腦，並記錄日期">一鍵下載到地端（ZIP）</button>
+            <button id="backupAck" class="btn secondary" title="如果您是自己從雲端硬碟把「系統備份」資料夾下載的，按這裡記錄日期">我已自行下載資料夾</button>
           </div>
           <div class="card"><div id="backupBox">載入中…</div></div>
           <div class="card" id="backupRestoreCard">
@@ -289,7 +290,7 @@
 
   <div id="overlay" class="overlay hidden"><div class="modal" id="modal"></div></div>
 
-  <script src="config.js?v=0.9.0"></script>
-  <script src="app.js?v=0.9.0"></script>
+  <script src="config.js?v=0.9.1"></script>
+  <script src="app.js?v=0.9.1"></script>
 </body>
 </html>
