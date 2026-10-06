@@ -1619,7 +1619,7 @@
     var d = taxData, box = $('taxBox'); box.innerHTML = '';
     if (!d.period) { box.textContent = d.caps.isSuper ? '請先按「客戶資料」勾選營業稅客戶，再按「開啟新期別」。' : '尚未開啟任何期別，請聯絡超級管理員。'; updateTaxBatch(); return; }
     var rows = taxVisibleRows();
-    var t = el('table'), cg = el('colgroup');
+    var t = el('table', { style: 'min-width:780px' }), cg = el('colgroup'); box.style.overflowX = 'auto';
     ['34px', '95px', '', '110px'].concat(d.steps.map(function () { return '92px'; })).concat(['', '60px']).forEach(function (w) { cg.appendChild(el('col', w ? { style: 'width:' + w } : {})); }); t.appendChild(cg);
     var h = el('tr'), all = el('input', { type: 'checkbox' });
     all.onchange = function () { rows.forEach(function (r) { if (r.applicable) { if (all.checked) taxSel[r.filingId] = 1; else delete taxSel[r.filingId]; } }); renderTaxTable(); };
@@ -1769,7 +1769,7 @@
       if (!pd.canWrite) m.appendChild(el('div', { class: 'alert' }, '系統同步異常，目前只能查看，不能儲存。'));
       var tools = el('div', { class: 'toolbar' }); m.appendChild(tools);
       var rowsUi = [];
-      var t = el('table'), cg = el('colgroup'); ['34px', '90px', '', '120px', '92px', '110px', '170px'].forEach(function (w) { cg.appendChild(el('col', w ? { style: 'width:' + w } : {})); }); t.appendChild(cg);
+      var t = el('table', { style: 'min-width:840px' }), cg = el('colgroup'); ['34px', '90px', '', '110px', '92px', '100px', '150px'].forEach(function (w) { cg.appendChild(el('col', w ? { style: 'width:' + w } : {})); }); t.appendChild(cg);
       var h = el('tr'); ['', '統一編號', '公司', '簡稱', '營業稅客戶', '繳納方式', '申報注意事項'].forEach(function (x) { h.appendChild(el('th', {}, x)); }); t.appendChild(h);
       pd.profiles.forEach(function (p) {
         var tr = el('tr'), c0 = el('td'), cb = el('input', { type: 'checkbox' }); c0.appendChild(cb); tr.appendChild(c0);
