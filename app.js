@@ -195,6 +195,15 @@
       $('statIntakeNote').textContent = ik.enabled ? (ik.months ? ik.months + ' 家公司月份待處理' + (ik.reopened ? '｜' + ik.reopened + ' 家已處理後又有新檔案' : '') + (ik.review ? '｜' + ik.review + ' 份需人工確認' : '') : '目前沒有待處理的客戶上傳文件') + (ik.ghPercent >= 70 ? '｜⚠ GitHub 用量約 ' + ik.ghPercent + '%' : '') : '點此啟用';
       setNavCount('navIntake', ik.months);
     }
+    var bk = home.backup;
+    $('statBackup').classList.toggle('hidden', !bk);
+    if (bk) {
+      $('statBackupValue').textContent = !bk.enabled ? '尚未啟用' : (bk.lastFailed ? '備份失敗' : (bk.lastOkAt ? '正常' : '尚無備份'));
+      $('statBackupValue').className = 'value' + (!bk.enabled || bk.lastFailed ? ' err' : (bk.ackOverdue ? ' warn' : ''));
+      $('statBackupNote').textContent = !bk.enabled ? '點此啟用' :
+        ('最近成功：' + (bk.lastOkAt ? fmtTime(bk.lastOkAt) : '—') + (bk.ackOverdue ? '｜⚠ 已 ' + bk.daysSinceAck + ' 天沒下載到地端' : (bk.ackAt ? '｜上次下載到地端：' + fmtTime(bk.ackAt) : '')));
+      setNavCount('navBackup', bk.enabled && (bk.lastFailed || bk.ackOverdue) ? '!' : 0);
+    }
     var cn = home.counts;
     if (cn) {
       $('statUncValue').textContent = cn.unclassified.files + ' 份';
@@ -240,6 +249,7 @@
     if (page === 'invites') loadInvites();
     if (page === 'unclassified') loadUncReminder();
     if (page === 'intake') loadIntake();
+    if (page === 'backup') loadBackup();
     if (page === 'exceptions') loadExceptions();
     if (page === 'takeover') loadTakeover();
     if (page === 'audit') loadAudit(false);
@@ -862,6 +872,75 @@
     });
   };
 
+  /* ---------- 系統備份（僅超級管理員） ---------- */
+  var backupData = null;
+  function loadBackup() {
+    var box = $('backupBox'); box.textContent = '載入中…';
+    call('listBackups', {}, function (d) {
+      backupData = d;
+      $('backupSetup').classList.toggle('hidden', !!d.enabled);
+      $('backupNow').classList.toggle('hidden', !d.enabled);
+      $('backupAck').classList.toggle('hidden', !d.enabled);
+      $('backupRestoreCard').classList.toggle('hidden', !d.enabled);
+      box.innerHTML = '';
+      if (!d.enabled) { box.appendChild(el('div', { class: 'muted' }, '尚未啟用。按上方「啟用系統備份」，系統會在雲端硬碟建立「系統備份」資料夾（與「客戶資料」同一層、不分享給任何人），之後每天自動備份。')); return; }
+      var h = d.home || {};
+      var p = el('div', { style: 'margin-bottom:10px' });
+      p.appendChild(el('a', { href: d.rootUrl, target: '_blank', rel: 'noopener' }, '開啟「系統備份」資料夾'));
+      box.appendChild(p);
+      if (d.last) box.appendChild(el('div', { class: d.last.failed ? 'err' : 'muted', style: 'margin-bottom:6px' }, '最近一次備份：' + fmtTime(d.last.at) + '｜' + (d.last.failed ? '有失敗' : '成功') + '｜' + d.last.message));
+      else box.appendChild(el('div', { class: 'muted', style: 'margin-bottom:6px' }, '尚未執行過備份，系統會在今天的每日工作自動執行，也可按「立即備份一次」。'));
+      box.appendChild(el('div', { class: h.ackOverdue ? 'warn' : 'muted', style: 'margin-bottom:10px' },
+        '上次下載到地端：' + (h.ackAt ? fmtTime(h.ackAt) : '尚未記錄') + (h.ackOverdue ? '（已超過 35 天，請把「系統備份」資料夾下載到地端電腦，再按「已下載到地端」）' : '') + '｜' + d.keepNote));
+      var t = el('table'); var hr = el('tr');
+      ['備份', '種類', '建立時間', '開啟'].forEach(function (x) { hr.appendChild(el('th', {}, x)); }); t.appendChild(hr);
+      var KIND = { DB: '資料庫', INV: '檔案清單', SNAPSHOT: '還原前快照' };
+      d.items.forEach(function (i) {
+        var tr = el('tr');
+        tr.appendChild(el('td', {}, i.name)); tr.appendChild(el('td', {}, KIND[i.type] || i.type)); tr.appendChild(el('td', {}, fmtTime(i.createdAt)));
+        var td = el('td'); td.appendChild(el('a', { href: i.url, target: '_blank', rel: 'noopener' }, '開啟')); tr.appendChild(td); t.appendChild(tr);
+      });
+      box.appendChild(t);
+      var fsel = $('backupRestoreFile'); fsel.innerHTML = '';
+      d.items.filter(function (i) { return i.type === 'DB'; }).forEach(function (i) { fsel.appendChild(el('option', { value: i.id }, i.name)); });
+      fillRestoreTables();
+    }, function (err) { box.textContent = err.message; });
+  }
+  function fillRestoreTables() {
+    var tsel = $('backupRestoreTable'); tsel.innerHTML = '';
+    if (!backupData || !backupData.tables) return;
+    var opt = $('backupRestoreFile').selectedOptions[0];
+    var isLog = opt && opt.textContent.indexOf('日誌庫') === 0;
+    backupData.tables.filter(function (x) { return isLog ? x.db === 'log' : x.db === 'main'; }).forEach(function (x) { tsel.appendChild(el('option', { value: x.name }, x.name)); });
+  }
+  $('backupRestoreFile').onchange = fillRestoreTables;
+  $('backupReload').onclick = loadBackup;
+  $('backupSetup').onclick = function () {
+    if (!confirm('要在雲端硬碟建立「系統備份」資料夾並啟用嗎？\n（與「客戶資料」同一層，不分享給任何人；之後每天自動備份）')) return;
+    call('backupSetup', {}, function (r) { alert('已啟用：' + r.folderName); loadBackup(); });
+  };
+  $('backupNow').onclick = function () {
+    var b = $('backupNow'); b.disabled = true; b.textContent = '備份中…（約需 1 分鐘）';
+    call('backupNow', {}, function (r) { b.disabled = false; b.textContent = '立即備份一次'; alert((r.failed ? '有失敗：' : '完成：') + r.messages.join('\n')); loadBackup(); },
+      function (err) { b.disabled = false; b.textContent = '立即備份一次'; alert(err.message); });
+  };
+  $('backupAck').onclick = function () {
+    if (!confirm('確認您已把「系統備份」資料夾下載到地端電腦了嗎？')) return;
+    call('backupAck', {}, function () { loadBackup(); });
+  };
+  $('backupRestoreGo').onclick = function () {
+    var fileId = $('backupRestoreFile').value, table = $('backupRestoreTable').value, mode = $('backupRestoreMode').value;
+    if (!fileId || !table) { alert('請選擇備份與資料表'); return; }
+    var confirmText = '';
+    if (mode === 'replace') {
+      confirmText = prompt('您要用「' + $('backupRestoreFile').selectedOptions[0].textContent + '」取代現行的「' + table + '」資料表。\n系統會先把現行試算表另存到「還原前快照」。\n\n請輸入「還原」二字確認：') || '';
+      if (confirmText !== '還原') { alert('已取消'); return; }
+    }
+    call('backupRestoreTable', { fileId: fileId, table: table, mode: mode, confirm: confirmText }, function (r) {
+      alert(r.mode === 'preview' ? '已在現行試算表新增分頁「' + r.sheet + '」（' + r.rows + ' 列），請到試算表檢視，現行資料沒有變動。' : '已還原 ' + r.rows + ' 列；還原前的試算表已另存為「' + r.snapshot + '」。');
+    });
+  };
+
   /* ---------- 雲端硬碟檢查（僅超級管理員） ---------- */
   var DA_KIND = { EXTRA: '多餘的分享', ROLE_HIGH: '權限過高', OPEN_LINK: '連結公開', MISSING: '應有但雲端沒有' };
   var DA_ROLE = { reader: '檢視者', commenter: '留言者', writer: '編輯者', fileOrganizer: '內容管理員', organizer: '管理員' };
@@ -1383,6 +1462,7 @@
   $('statUnc').onclick = function () { go('unclassified'); };
   $('statExc').onclick = function () { go('exceptions'); };
   $('statIntake').onclick = function () { go('intake'); };
+  $('statBackup').onclick = function () { go('backup'); };
   $('overlay').onclick = function (e) { if (e.target === $('overlay')) closeModal(); };
 
   function enter(notice) {

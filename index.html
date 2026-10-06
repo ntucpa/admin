@@ -129,6 +129,7 @@
         <a data-page="takeover" class="super-only">非事務所擁有的檔案</a>
         <a data-page="driveaudit" class="super-only">雲端硬碟檢查</a>
         <a data-page="companyimport" class="super-only">批次匯入公司</a>
+        <a data-page="backup" class="super-only">備份<span class="navcount" id="navBackup"></span></a>
         <a data-page="audit" class="super-only">稽核紀錄</a>
         <a data-page="settings" class="super-only">系統設定</a>
       </nav>
@@ -140,6 +141,7 @@
             <div class="card stat"><div class="label">今日背景處理用量</div><div class="value" id="statUsage">—</div><div class="muted" id="statUsageNote"></div></div>
             <div class="card stat click" id="statUnc"><div class="label">未分類文件</div><div class="value" id="statUncValue">—</div><div class="muted" id="statUncNote">點此查看</div></div>
             <div class="card stat click hidden" id="statIntake"><div class="label">待處理客戶上傳文件</div><div class="value" id="statIntakeValue">—</div><div class="muted" id="statIntakeNote">點此查看</div></div>
+            <div class="card stat click hidden" id="statBackup"><div class="label">系統備份</div><div class="value" id="statBackupValue">—</div><div class="muted" id="statBackupNote">點此查看</div></div>
             <div class="card stat hidden" id="statLine"><div class="label">本月 LINE 訊息用量</div><div class="value" id="statLineValue">—</div><div class="muted" id="statLineNote"></div></div>
             <div class="card stat click" id="statExc"><div class="label">異常清單</div><div class="value" id="statExcValue">—</div><div class="muted">點此處理</div></div>
           </div>
@@ -221,6 +223,28 @@
           <div class="card"><div id="intakeBox">載入中…</div></div>
         </section>
 
+        <section id="page-backup" class="hidden">
+          <h1>系統備份</h1>
+          <p class="muted">每天自動把系統資料庫（主資料庫、日誌庫）與檔案清單複製到雲端硬碟的「系統備份」資料夾（不分享給任何人）。保留近 30 天每日備份，及 12 個月內每月 1 日的備份。<b>客戶檔案本身不在這裡備份。</b></p>
+          <div class="toolbar">
+            <button id="backupReload" class="btn secondary">重新整理</button>
+            <button id="backupSetup" class="btn hidden">啟用系統備份</button>
+            <button id="backupNow" class="btn">立即備份一次</button>
+            <button id="backupAck" class="btn secondary" title="防範 Google 帳號出問題：每月把「系統備份」資料夾下載到地端電腦後，按這裡記錄日期">已下載到地端</button>
+          </div>
+          <div class="card"><div id="backupBox">載入中…</div></div>
+          <div class="card" id="backupRestoreCard">
+            <b>還原資料表</b>
+            <p class="muted">先選「預覽」：在現行試算表新增一個分頁，內容是那天備份的資料表，不會動到現行資料，您確認後可自行比對或複製。選「取代」會先把現行試算表另存到「還原前快照」，再用備份內容取代該資料表，須輸入「還原」確認。</p>
+            <div class="toolbar">
+              <select id="backupRestoreFile"></select>
+              <select id="backupRestoreTable"></select>
+              <select id="backupRestoreMode"><option value="preview">預覽（不動現行資料）</option><option value="replace">取代現行資料表</option></select>
+              <button id="backupRestoreGo" class="btn">執行還原</button>
+            </div>
+          </div>
+        </section>
+
         <section id="page-driveaudit" class="hidden">
           <h1>雲端硬碟檢查</h1>
           <p class="muted">比對公司資料夾與待分類資料夾「雲端實際分享給誰」和「系統記錄應該分享給誰」，並找出擁有者不是系統帳號的檔案（例如客戶自己上傳的）。按「開始檢查」只查詢、不會更動任何東西；有問題的項目要逐項按鈕才會修正，修正都會寫入稽核紀錄。</p>
@@ -265,7 +289,7 @@
 
   <div id="overlay" class="overlay hidden"><div class="modal" id="modal"></div></div>
 
-  <script src="config.js?v=0.8.3"></script>
-  <script src="app.js?v=0.8.3"></script>
+  <script src="config.js?v=0.9.0"></script>
+  <script src="app.js?v=0.9.0"></script>
 </body>
 </html>
