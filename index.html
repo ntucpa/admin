@@ -121,7 +121,7 @@
         <a data-page="bindings" data-feature="BINDING_APPROVAL">客戶綁定審核<span class="navcount" id="navPending"></span></a>
         <a data-page="customers">客戶管理</a>
         <a data-page="invites" data-feature="INVITE_MANAGEMENT">邀請管理</a>
-        <a data-page="tax" data-feature="TAX_CHECKLIST">稅務檢核</a>
+        <a data-page="tax" data-feature="TAX_CHECKLIST">稅務申報</a>
         <a data-page="unclassified">未分類提醒<span class="navcount" id="navUnc"></span></a>
         <a data-page="intake" class="super-only">客戶上傳文件<span class="navcount" id="navIntake"></span></a>
         <a data-page="exceptions" data-feature="EXCEPTION_HANDLING">異常處理<span class="navcount" id="navExc"></span></a>
@@ -213,7 +213,7 @@
         </section>
 
         <section id="page-tax" class="hidden">
-          <h1>稅務檢核（營業稅）</h1>
+          <h1>稅務申報（營業稅）</h1>
           <div id="taxStale" class="alert hidden"></div>
           <div class="toolbar" id="taxPeriodBar"></div>
           <div class="toolbar">
@@ -233,7 +233,7 @@
         </section>
 
         <section id="page-taxup" class="hidden">
-          <h1>上傳請款單 <button id="upBackBtn" class="btn small secondary">回稅務檢核</button></h1>
+          <h1>上傳請款單 <button id="upBackBtn" class="btn small secondary">回稅務申報</button></h1>
           <div id="upStatus"></div>
           <div id="upDrop" class="card" style="border:2px dashed #98a2b3;text-align:center;padding:28px">
             把請款明細表 PDF 拖到這裡，或 <button id="upPick" class="btn small">選擇檔案</button>
@@ -249,7 +249,7 @@
         </section>
 
         <section id="page-taxsettings" class="hidden">
-          <h1>稅務模組設定 <button id="setBackBtn" class="btn small secondary">回稅務檢核</button></h1>
+          <h1>稅務模組設定 <button id="setBackBtn" class="btn small secondary">回稅務申報</button></h1>
           <div id="setBox">載入中…</div>
         </section>
 
@@ -330,8 +330,8 @@
 
   <div id="overlay" class="overlay hidden"><div class="modal" id="modal"></div></div>
 
-  <script src="bill-parser.js?v=0.14.1"></script>
-  <script src="config.js?v=0.14.1"></script>
-  <script src="app.js?v=0.14.1"></script>
+  <script src="bill-parser.js?v=0.14.2"></script>
+  <script src="config.js?v=0.14.2"></script>
+  <script src="app.js?v=0.14.2"></script>
 </body>
 </html>

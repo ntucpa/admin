@@ -1562,7 +1562,7 @@
       function (err) { hideBusy(); showLogin(err.message, notice); });
   }
 
-  /* ---------- 稅務檢核（營業稅）：資料與規則都在 Cloudflare（閘道直接回答，沒有 Apps Script 備援） ---------- */
+  /* ---------- 稅務申報（營業稅）：資料與規則都在 Cloudflare（閘道直接回答，沒有 Apps Script 備援） ---------- */
   var STEP_LABELS = { NOTIFIED: '已通知', DOCS_COMPLETE: '發票收齊', BOOKED: '已入帳', FILED: '已申報' };
   var taxData = null, taxSel = {}, taxBusy = false;
   var TAX_FILTERS = [['', '全部'], ['NOTIFIED', '未通知'], ['DOCS_COMPLETE', '未收齊'], ['BOOKED', '未入帳'], ['FILED', '未申報'], ['NOTES', '有注意事項'], ['NA', '不適用']];
