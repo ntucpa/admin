@@ -1164,6 +1164,16 @@
       invData = d;
       var box = $('inviteBox'); box.innerHTML = '';
       if (!d.invites.length) { box.appendChild(el('div', { class: 'muted' }, '尚未建立任何邀請連結。')); return; }
+      var isSuper = me && me.role === 'SUPER_ADMIN';
+      var deletable = d.invites.filter(function (i) { return i.status === 'EXPIRED' || i.status === 'REVOKED'; });
+      if (isSuper && deletable.length) {
+        var pb = el('button', { class: 'btn small danger', style: 'margin-bottom:10px' }, '清除已撤銷／已過期的邀請（' + deletable.length + ' 筆）');
+        pb.onclick = function () {
+          if (!confirm('要刪除全部 ' + deletable.length + ' 筆已撤銷或已過期的邀請嗎？（可使用與已使用的不會刪）')) return;
+          pb.disabled = true; call('purgeInvites', {}, function (r) { alert('已刪除 ' + r.removed + ' 筆'); loadInvites(); }, function (e) { pb.disabled = false; alert(e.message); });
+        };
+        box.appendChild(pb);
+      }
       var t = el('table');
       var cg = el('colgroup'); ['', '120px', '120px', '80px', '', '90px', '100px'].forEach(function (w) { cg.appendChild(el('col', w ? { style: 'width:' + w } : {})); }); t.appendChild(cg);
       var h = el('tr'); ['公司', '建立時間', '到期時間', '狀態', '使用者', '建立者', '操作'].forEach(function (x) { h.appendChild(el('th', {}, x)); }); t.appendChild(h);
@@ -1184,6 +1194,11 @@
           var again = el('button', { class: 'btn small secondary' }, '重新建立');
           again.onclick = function () { createInvite(i.companyId); };
           op.appendChild(again);
+          if (isSuper) {
+            var del = el('button', { class: 'btn small danger', style: 'margin-left:6px' }, '刪除');
+            del.onclick = function () { if (confirm('確定刪除這筆「' + i.companyName + '」的邀請紀錄？')) call('deleteInvite', { inviteId: i.inviteId }, loadInvites, function (e) { alert(e.message); }); };
+            op.appendChild(del);
+          }
         }
         tr.appendChild(op);
         t.appendChild(tr);
