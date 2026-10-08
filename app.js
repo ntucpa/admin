@@ -1230,8 +1230,8 @@
         if (navigator.clipboard) navigator.clipboard.writeText(r.url).then(done, function () { document.execCommand('copy'); done(); });
         else { document.execCommand('copy'); done(); }
       };
-      box.appendChild(input); box.appendChild(copy); m.appendChild(box);
-      m.appendChild(el('p', { class: 'muted' }, '請把連結用 LINE 傳給客戶，客戶需在手機 LINE 裡點開。有效期限至 ' + fmtTime(r.expireAt) + '，只能使用一次。'));
+      if (!r.oaUrl) { box.appendChild(input); box.appendChild(copy); m.appendChild(box); } // 查得到官方帳號連結時，只顯示下方的「兩步驟訊息」（已含綁定連結）
+      m.appendChild(el('p', { class: 'muted' }, (r.oaUrl ? '請直接傳下面的「兩步驟訊息」給客戶' : '請把連結用 LINE 傳給客戶') + '，客戶需在手機 LINE 裡點開。有效期限至 ' + fmtTime(r.expireAt) + '，只能使用一次。'));
       if (r.oaUrl) {
         var msgText = '您好，請依下列兩步驟完成綁定：' + String.fromCharCode(10) + '1. 先加入我們的官方帳號：' + r.oaUrl + String.fromCharCode(10) + '2. 再點這個連結綁定公司（只能使用一次）：' + r.url;
         var ta = el('textarea', { rows: '5', readonly: 'readonly', style: 'width:100%' }); ta.value = msgText;
