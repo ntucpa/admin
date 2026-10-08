@@ -1787,7 +1787,7 @@
       dueInput = el('input', { type: 'date', style: 'width:auto' }); dueInput.value = d.paymentDeadline || '';
       dueInput.onchange = function () { noticeDialog('BILL', dueInput.value || ''); };
       bar.appendChild(dueInput);
-      bar.appendChild(el('span', { class: 'muted' }, d.defaultPaymentDeadline ? '（預設＝申報期限前一天，可改；改了訊息會跟著更新）' : '（已超過申報期限，沒有預設，請自行填寫）'));
+      bar.appendChild(el('span', { class: 'muted' }, d.defaultPaymentDeadline ? '（預設＝申報期限前一天，可改；改了訊息會跟著更新）' : (d.paymentDeadline ? '（已超過申報期限，沒有預設；這是您填的日期，改了訊息會跟著更新）' : '（已超過申報期限，沒有預設，請自行填寫）')));
       m.appendChild(bar);
       if (d.needPaymentDeadline) m.appendChild(el('div', { class: 'alert' }, '請先填付款期限，訊息才會完整。'));
     }
