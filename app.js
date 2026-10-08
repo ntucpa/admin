@@ -2214,7 +2214,7 @@
       d.steps.forEach(function (code) {
         var td = el('td'), s = r.steps[code];
         var btn = el('button', { class: 'linkbtn', style: 'text-decoration:none' }, s && s.status === 'DONE' ? ('✔ ' + s.date.slice(5)) : '—');
-        if (s && s.status === 'DONE') { btn.title = (s.by || '') + (s.source === 'LINE' ? '（依客戶 LINE 傳來的資料自動標記）' : '') + (s.source === 'DOC' ? '（依申報書／繳稅回執自動填入）' : '') + '（點一下修改日期或清除）'; btn.style.color = 'var(--ok)'; } else btn.style.color = '#98a2b3';
+        if (s && s.status === 'DONE') { btn.title = (s.by || '') + (s.source === 'LINE' ? '（依客戶 LINE 傳來的資料自動標記）' : '') + (s.source === 'DOC' ? '（依申報書／繳稅回執自動填入）' : '') + (s.source === 'DOC_AI' ? '（AI 讀取申報書／繳稅回執後自動填入，請抽查）' : '') + '（點一下修改日期或清除）'; btn.style.color = 'var(--ok)'; } else btn.style.color = '#98a2b3';
         btn.disabled = !r.applicable || d.period.status !== 'OPEN' || !d.caps.canWrite;
         btn.onclick = function () {
           if (s && s.status === 'DONE') stepDialog(r, code, s);
@@ -2241,8 +2241,8 @@
     var out = [], d = r.docs; if (!d) return out;
     function md(x) { return x ? x.slice(5).replace('-', '/') : ''; }
     function money(n) { return n === null || n === undefined ? '' : Number(n).toLocaleString('en-US'); }
-    if (d.filed) out.push('申報書：' + md(d.filed.date) + ' 申報' + (d.filed.taxDue !== null ? '，應實繳 ' + money(d.filed.taxDue) : '') + (d.filed.count > 1 ? '（第 ' + d.filed.count + ' 次申報）' : '') + (d.filed.differs ? '　⚠與目前登記的 ' + md(d.filed.registered) + ' 不同' : ''));
-    if (d.paid) out.push('繳稅回執：' + md(d.paid.date) + ' 繳款 ' + money(d.paid.amount) + (d.paid.differs ? '　⚠與目前登記的 ' + md(d.paid.registered) + ' 不同' : ''));
+    if (d.filed) out.push('申報書' + (d.filed.ai ? '（AI 讀取）' : '') + '：' + md(d.filed.date) + ' 申報' + (d.filed.taxDue !== null ? '，應實繳 ' + money(d.filed.taxDue) : '') + (d.filed.count > 1 ? '（第 ' + d.filed.count + ' 次申報）' : '') + (d.filed.differs ? '　⚠與目前登記的 ' + md(d.filed.registered) + ' 不同' : ''));
+    if (d.paid) out.push('繳稅回執' + (d.paid.ai ? '（AI 讀取）' : '') + '：' + md(d.paid.date) + ' 繳款 ' + money(d.paid.amount) + (d.paid.differs ? '　⚠與目前登記的 ' + md(d.paid.registered) + ' 不同' : ''));
     return out;
   }
 
