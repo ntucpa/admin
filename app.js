@@ -1563,9 +1563,9 @@
   }
 
   /* ---------- 稅務申報（營業稅）：資料與規則都在 Cloudflare（閘道直接回答，沒有 Apps Script 備援） ---------- */
-  var STEP_LABELS = { NOTIFIED: '已通知', DOCS_COMPLETE: '發票收齊', BOOKED: '已入帳', FILED: '已申報' };
+  var STEP_LABELS = { NOTICE1: '通知1', NOTICE2: '通知2', INVOICE_RECEIVED: '發票回傳', BILL_ISSUED: '出請款單', BILL_NOTIFIED: '通知請款', PAID_REPORTED: '回報匯款', RECONCILED: '對帳', TAX_PAID: '繳稅', FILED: '申報' };
   var taxData = null, taxSel = {}, taxBusy = false;
-  var TAX_FILTERS = [['', '全部'], ['NOTIFIED', '未通知'], ['DOCS_COMPLETE', '未收齊'], ['BOOKED', '未入帳'], ['FILED', '未申報'], ['NOTES', '有注意事項'], ['NA', '不適用']];
+  var TAX_FILTERS = [['', '全部']].concat(Object.keys(STEP_LABELS).map(function (c) { return [c, '未做：' + STEP_LABELS[c]]; })).concat([['NOTES', '有備註或注意事項'], ['NA', '不適用']]);
 
   function todayStr() { var d = new Date(), p = function (n) { return ('0' + n).slice(-2); }; return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()); }
   function stepDone(row, code) { return !!(row.steps[code] && row.steps[code].status === 'DONE'); }
@@ -1605,6 +1605,11 @@
     var bu = el('button', { class: 'btn small' }, '上傳請款單'); bu.onclick = function () { go('taxup'); }; bar.appendChild(bu);
     if (d.caps.isSuper) { var bs = el('button', { class: 'btn small secondary' }, '模組設定'); bs.onclick = function () { go('taxsettings'); }; bar.appendChild(bs); }
     var b5 = el('button', { class: 'btn small secondary' }, '重新整理'); b5.onclick = function () { loadTax(d.period && d.period.periodId); }; bar.appendChild(b5);
+    var ss = $('taxStepSel'); ss.innerHTML = ''; d.steps.forEach(function (c) { ss.appendChild(el('option', { value: c }, STEP_LABELS[c])); });
+    var nb = $('taxNotice'); nb.innerHTML = ''; nb.classList.add('hidden');
+    var idx = d.period ? d.periods.map(function (x) { return x.periodId; }).indexOf(d.period.periodId) : -1;
+    if (idx > 0) { nb.classList.remove('hidden'); nb.appendChild(el('span', {}, '這是歷史期別（' + d.period.label + '），仍可修改。 ')); var bl = el('button', { class: 'linkbtn' }, '回到最新期別'); bl.onclick = function () { loadTax(d.periods[0].periodId); }; nb.appendChild(bl); }
+    else if (idx === 0 && d.earlierUnfiled > 0 && d.periods.length > 1) { nb.classList.remove('hidden'); nb.appendChild(el('span', {}, '上一期尚有 ' + d.earlierUnfiled + ' 家未申報。 ')); var bp = el('button', { class: 'linkbtn' }, '查看上一期'); bp.onclick = function () { loadTax(d.periods[1].periodId); }; nb.appendChild(bp); }
     renderTaxTable();
   }
 
@@ -1614,7 +1619,7 @@
       if (q && (r.companyId + ' ' + r.shortName + ' ' + r.companyName).toLowerCase().indexOf(q) < 0) return false;
       if (f === 'NA') return !r.applicable;
       if (!r.applicable) return false;
-      if (f === 'NOTES') return !!(r.taxNotes || r.bookkeepingNotes);
+      if (f === 'NOTES') return !!(r.note || r.taxNotes || r.bookkeepingNotes);
       if (f) return !stepDone(r, f);
       return true;
     });
@@ -1625,11 +1630,11 @@
     if (!d.period) { box.textContent = d.caps.isSuper ? '請先按「客戶資料」勾選營業稅客戶，再按「開啟新期別」。' : '尚未開啟任何期別，請聯絡超級管理員。'; updateTaxBatch(); return; }
     var rows = taxVisibleRows();
     var t = el('table', { style: 'min-width:780px' }), cg = el('colgroup'); box.style.overflowX = 'auto';
-    ['34px', '95px', '', '110px'].concat(d.steps.map(function () { return '92px'; })).concat(['', '60px']).forEach(function (w) { cg.appendChild(el('col', w ? { style: 'width:' + w } : {})); }); t.appendChild(cg);
+    ['34px', '95px', '', '110px'].concat(d.steps.map(function () { return '84px'; })).forEach(function (w) { cg.appendChild(el('col', w ? { style: 'width:' + w } : {})); }); t.appendChild(cg);
     var h = el('tr'), all = el('input', { type: 'checkbox' });
     all.onchange = function () { rows.forEach(function (r) { if (r.applicable) { if (all.checked) taxSel[r.filingId] = 1; else delete taxSel[r.filingId]; } }); renderTaxTable(); };
     var th0 = el('th'); th0.appendChild(all); h.appendChild(th0);
-    ['統一編號', '簡稱', '進度'].concat(d.steps.map(function (c) { return STEP_LABELS[c]; })).concat(['備註', '注意']).forEach(function (x) { h.appendChild(el('th', {}, x)); });
+    ['統一編號', '簡稱', '進度'].concat(d.steps.map(function (c) { return STEP_LABELS[c]; })).forEach(function (x) { h.appendChild(el('th', {}, x)); });
     t.appendChild(h);
     rows.forEach(function (r) {
       var tr = el('tr', r.applicable ? {} : { style: 'opacity:.55' });
@@ -1637,24 +1642,23 @@
       cb.onchange = function () { if (cb.checked) taxSel[r.filingId] = 1; else delete taxSel[r.filingId]; updateTaxBatch(); };
       c0.appendChild(cb); tr.appendChild(c0);
       tr.appendChild(el('td', {}, r.companyId));
-      tr.appendChild(el('td', { title: r.companyName }, r.shortName || r.companyName));
+      var nm = el('td', { title: r.companyName }), nl = el('button', { class: 'linkbtn', style: 'text-decoration:none;color:inherit', title: '點一下查看或編輯備註' }, r.shortName || r.companyName);
+      nl.onclick = function () { notesDialog(r); }; nm.appendChild(nl);
+      if (r.note || r.taxNotes || r.bookkeepingNotes) { var ni = el('button', { class: 'linkbtn', style: 'text-decoration:none;margin-left:4px', title: [r.note, r.taxNotes, r.bookkeepingNotes].filter(Boolean).join('\n') }, 'ⓘ'); ni.onclick = function () { notesDialog(r); }; nm.appendChild(ni); }
+      tr.appendChild(nm);
       var last = lastStep(r, d.steps);
       var pg = el('td'); pg.appendChild(r.applicable ? badge(last ? STEP_LABELS[last] : '未開始', last === 'FILED' ? 'ok' : (last ? '' : 'off')) : badge('不適用', 'off')); tr.appendChild(pg);
       d.steps.forEach(function (code) {
         var td = el('td'), s = r.steps[code];
         var btn = el('button', { class: 'linkbtn', style: 'text-decoration:none' }, s && s.status === 'DONE' ? ('✔ ' + s.date.slice(5)) : '—');
-        if (s && s.status === 'DONE') { btn.title = '操作人：' + (s.by || '') + '（點一下取消標記）'; btn.style.color = 'var(--ok)'; } else btn.style.color = '#98a2b3';
+        if (s && s.status === 'DONE') { btn.title = '操作人：' + (s.by || '') + '（點一下修改日期或清除）'; btn.style.color = 'var(--ok)'; } else btn.style.color = '#98a2b3';
         btn.disabled = !r.applicable || d.period.status !== 'OPEN' || !d.caps.canWrite;
         btn.onclick = function () {
-          if (s && s.status === 'DONE') { if (confirm('取消「' + (r.shortName || r.companyId) + '」的「' + STEP_LABELS[code] + '」標記？')) taxMark([r.filingId], code, 'CLEAR', ''); }
+          if (s && s.status === 'DONE') stepDialog(r, code, s);
           else taxMark([r.filingId], code, 'DONE', todayStr());
         };
         td.appendChild(btn); tr.appendChild(td);
       });
-      var nt = el('td'), nb = el('button', { class: 'linkbtn' }, r.note ? r.note : '＋'); nb.title = '編輯備註'; nb.disabled = d.period.status !== 'OPEN' || !d.caps.canWrite;
-      nb.onclick = function () { noteDialog(r); }; nt.appendChild(nb); tr.appendChild(nt);
-      var ic = el('td'); if (r.taxNotes || r.bookkeepingNotes) { var ib = el('button', { class: 'linkbtn', style: 'text-decoration:none', title: '申報注意事項／帳務注意事項' }, 'ⓘ'); ib.onclick = function () { notesDialog(r); }; ic.appendChild(ib); }
-      tr.appendChild(ic);
       t.appendChild(tr);
     });
     if (!rows.length) box.appendChild(el('div', { class: 'muted' }, d.rows.length ? '沒有符合條件的公司。' : '這個期別目前沒有任何公司。請到「客戶資料」勾選營業稅客戶；已開啟的期別可用「加入公司」補進來。'));
@@ -1729,19 +1733,36 @@
     }, function (e) { box.textContent = e.message; });
   };
 
-  function noteDialog(r) {
-    var m = openModal('備註：' + (r.shortName || r.companyId));
+  /** 備註與注意事項：唯讀顯示申報／帳務注意事項，本期備註可直接編輯 */
+  function notesDialog(r) {
+    var m = openModal((r.shortName || r.companyName) + '　備註與注意事項');
+    m.appendChild(el('div', { class: 'card-title' }, '申報注意事項')); m.appendChild(el('div', { style: 'white-space:pre-wrap;margin-bottom:12px' }, r.taxNotes || '（無）'));
+    m.appendChild(el('div', { class: 'card-title' }, '帳務注意事項')); m.appendChild(el('div', { style: 'white-space:pre-wrap;margin-bottom:12px' }, r.bookkeepingNotes || '（無）'));
     var inp = el('input', { type: 'text', maxlength: '300' }); inp.value = r.note || '';
-    field(m, '備註', inp);
+    var canEdit = taxData.period.status === 'OPEN' && taxData.caps.canWrite; inp.disabled = !canEdit;
+    field(m, '本期備註', inp);
+    if (!canEdit) { var c = el('div', { class: 'actions' }), cb = el('button', { class: 'btn secondary' }, '關閉'); cb.onclick = closeModal; c.appendChild(cb); m.appendChild(c); return; }
     modalActions(m, '儲存', function (fail) {
       call('tax.setNote', { filingId: r.filingId, updatedAt: r.updatedAt, note: inp.value }, function (x) { r.note = inp.value.trim(); r.updatedAt = x.updatedAt; closeModal(); renderTaxTable(); }, function (e) { fail(e.message); if (e.code === 'CONFLICT') loadTax(taxData.period.periodId); });
     });
   }
-  function notesDialog(r) {
-    var m = openModal((r.shortName || r.companyName) + ' 注意事項');
-    m.appendChild(el('div', { class: 'card-title' }, '申報注意事項')); m.appendChild(el('div', { style: 'white-space:pre-wrap;margin-bottom:12px' }, r.taxNotes || '（無）'));
-    m.appendChild(el('div', { class: 'card-title' }, '帳務注意事項')); m.appendChild(el('div', { style: 'white-space:pre-wrap' }, r.bookkeepingNotes || '（無）'));
-    var bar = el('div', { class: 'actions' }), c = el('button', { class: 'btn secondary' }, '關閉'); c.onclick = closeModal; bar.appendChild(c); m.appendChild(bar);
+
+  /** 已完成階段：改日期或清除（系統自動帶入的階段清除前再確認一次） */
+  function stepDialog(r, code, s) {
+    var name = r.shortName || r.companyId;
+    var m = openModal(name + '　' + STEP_LABELS[code]);
+    m.appendChild(el('div', { class: 'muted', style: 'margin-bottom:8px' }, '操作人：' + (s.by || '') + (s.source && s.source !== 'MANUAL' ? '（系統自動記錄）' : '')));
+    var dt = el('input', { type: 'date' }); dt.value = s.date || todayStr(); field(m, '日期', dt);
+    var bar = el('div', { class: 'actions' });
+    var bs = el('button', { class: 'btn' }, '儲存日期'), bc = el('button', { class: 'btn danger' }, '清除標記'), bx = el('button', { class: 'btn secondary' }, '關閉');
+    var ok = taxData.period.status === 'OPEN' && taxData.caps.canWrite; bs.disabled = !ok; bc.disabled = !ok;
+    bs.onclick = function () { if (!dt.value) return; closeModal(); taxMark([r.filingId], code, 'DONE', dt.value); };
+    bc.onclick = function () {
+      var auto = s.source && s.source !== 'MANUAL';
+      if (auto && !confirm('這是系統自動記錄的階段，確定要清除嗎？')) return;
+      closeModal(); taxMark([r.filingId], code, 'CLEAR', '');
+    };
+    bx.onclick = closeModal; bar.appendChild(bs); bar.appendChild(bc); bar.appendChild(bx); m.appendChild(bar);
   }
 
   function openPeriodDialog() {
