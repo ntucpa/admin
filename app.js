@@ -1742,6 +1742,7 @@
         var last = lastStep(r, d.steps), info = [];
         if (last) info.push('最近完成：' + STEP_LABELS[last] + ' ' + r.steps[last].date.slice(5));
         if (stepDone(r, 'PAID_REPORTED') && !stepDone(r, 'RECONCILED')) info.push('客戶已回報匯款 ' + r.steps.PAID_REPORTED.date.slice(5));
+        if (r.invoices && r.invoices.newCount > 0) info.push('又收到 ' + r.invoices.newCount + ' 份（最近 ' + r.invoices.newLastAt.slice(5, 10) + '）');
         if (r.reports && r.reports.INVOICES_DONE) info.push('✓客戶已確認傳完發票 ' + r.reports.INVOICES_DONE.slice(5));
         if (r.reports && r.reports.NO_INVOICE) info.push('客戶回覆本期沒有發票 ' + r.reports.NO_INVOICE.slice(5));
         left.appendChild(el('div', { class: 'muted', style: 'font-size:12px' }, info.join('　·　')));
@@ -1974,6 +1975,11 @@
   }
   function countdown(n) { if (n == null) return ''; if (n > 0) return '還有 ' + n + ' 天'; if (n === 0) return '今天截止'; return '已逾期 ' + (-n) + ' 天'; }
 
+  /** 「已看過」：全事務所共用；有更新的上傳才會再出現 */
+  function markSeen(keys) {
+    call('tax.markSeen', { keys: keys }, function () { loadTax(taxData && taxData.period && taxData.period.periodId); }, function (e) { alert(e.message); });
+  }
+
   function renderTaxHome() {
     var h = taxHomeData, box = $('taxHome'); box.innerHTML = '';
     if (!h || !h.period) return;
@@ -1991,12 +1997,42 @@
       h.anomalies.forEach(function (x) {
         var det = el('details', { style: 'margin:4px 0' });
         det.appendChild(el('summary', { style: 'cursor:pointer;color:var(--danger)' }, (x.severity === 'high' ? '嚴重｜' : '') + x.label + '：' + x.items.length + ' 家'));
-        x.items.forEach(function (it) { det.appendChild(el('div', { style: 'padding:2px 0 2px 18px;font-size:13px' }, it.name + '　' + it.companyId + (it.note ? '　（' + it.note + '）' : ''))); });
+        x.items.forEach(function (it) {
+          var line = el('div', { style: 'padding:2px 0 2px 18px;font-size:13px' }, it.name + '　' + it.companyId + (it.note ? '　（' + it.note + '）' : ''));
+          if (it.seenKey) { var sb = el('button', { class: 'linkbtn', style: 'margin-left:8px' }, '已看過'); sb.onclick = function () { markSeen([it.seenKey]); }; line.appendChild(sb); }
+          det.appendChild(line);
+        });
         an.appendChild(det);
       });
       box.appendChild(an);
     }
 
+    var nw = h.news || { moreInvoices: [], afterFiled: [], excluded: [] };
+    if (nw.moreInvoices.length || nw.afterFiled.length || nw.excluded.length) {
+      var nb = el('div', { style: 'background:#e8f1fd;border:1px solid #a9c8f2;border-radius:8px;padding:10px 14px;margin-bottom:10px' });
+      nb.appendChild(el('div', { style: 'font-weight:700;color:#1f4f99;margin-bottom:6px' }, '新動態'));
+      function group(title, list, extra) {
+        if (!list.length) return;
+        var det = el('details', { style: 'margin:4px 0' });
+        det.appendChild(el('summary', { style: 'cursor:pointer;color:#1f4f99' }, title + '：' + list.length + ' 家'));
+        list.forEach(function (it) {
+          var line = el('div', { style: 'padding:2px 0 2px 18px;font-size:13px' }, it.name + '　' + it.companyId + '　又收到 ' + it.count + ' 份（最近 ' + it.lastDay + '）');
+          var sb = el('button', { class: 'linkbtn', style: 'margin-left:8px' }, '已看過'); sb.onclick = function () { markSeen([it.seenKey]); }; line.appendChild(sb);
+          if (extra) line.appendChild(extra(it));
+          det.appendChild(line);
+        });
+        var all = el('button', { class: 'linkbtn', style: 'margin:2px 0 4px 18px' }, '全部已看過'); all.onclick = function () { markSeen(list.map(function (x) { return x.seenKey; })); };
+        det.appendChild(all); nb.appendChild(det);
+      }
+      group('客戶又傳了發票（還沒出請款單）', nw.moreInvoices);
+      group('申報後又收到的檔案（可能屬於下一期）', nw.afterFiled);
+      group('非營業稅申報客戶有新動態', nw.excluded, function (it) {
+        var ab = el('button', { class: 'linkbtn', style: 'margin-left:8px' }, '加回營業稅申報客戶');
+        ab.onclick = function () { call('tax.setVatExcluded', { companyIds: [it.companyId], excluded: false }, function () { loadTax(taxData && taxData.period && taxData.period.periodId); }, function (e) { alert(e.message); }); };
+        return ab;
+      });
+      box.appendChild(nb);
+    }
     box.appendChild(renderMemoBox(h));
     if (scrollToMemo) { scrollToMemo = false; var mb0 = $('taxMemoBox'); if (mb0) mb0.scrollIntoView(); }
 
@@ -2115,6 +2151,7 @@
       tr.appendChild(el('td', {}, r.companyId));
       var nm = el('td', { title: r.companyName }), nl = el('button', { class: 'linkbtn', style: 'text-decoration:none;color:inherit', title: '點一下查看或編輯備註' }, r.shortName || r.companyName);
       nl.onclick = function () { notesDialog(r); }; nm.appendChild(nl);
+      if (r.invoices && r.invoices.newCount > 0) { var mb = el('button', { class: 'badge warn', style: 'margin-left:6px;border:0;cursor:pointer', title: '客戶又傳了檔案，按一下標示已看過' }, '又收到 ' + r.invoices.newCount + ' 份 ' + r.invoices.newLastAt.slice(5, 10)); mb.onclick = function () { markSeen(['F:' + r.filingId]); }; nm.appendChild(mb); }
       if (r.reports && r.reports.INVOICES_DONE) nm.appendChild(el('span', { class: 'badge ok', style: 'margin-left:6px', title: '客戶在 LINE 按了「我已傳完發票」' }, '✓客戶已確認傳完 ' + r.reports.INVOICES_DONE.slice(5)));
       if (r.reports && r.reports.NO_INVOICE) nm.appendChild(el('span', { class: 'badge warn', style: 'margin-left:6px', title: '客戶在 LINE 按了「本期沒有發票」' }, '客戶回覆本期沒有發票 ' + r.reports.NO_INVOICE.slice(5)));
       if (r.note || r.taxNotes || r.bookkeepingNotes) { var ni = el('button', { class: 'linkbtn', style: 'text-decoration:none;margin-left:4px', title: [r.note, r.taxNotes, r.bookkeepingNotes].filter(Boolean).join('\n') }, 'ⓘ'); ni.onclick = function () { notesDialog(r); }; nm.appendChild(ni); }
@@ -2124,7 +2161,7 @@
       d.steps.forEach(function (code) {
         var td = el('td'), s = r.steps[code];
         var btn = el('button', { class: 'linkbtn', style: 'text-decoration:none' }, s && s.status === 'DONE' ? ('✔ ' + s.date.slice(5)) : '—');
-        if (s && s.status === 'DONE') { btn.title = '操作人：' + (s.by || '') + '（點一下修改日期或清除）'; btn.style.color = 'var(--ok)'; } else btn.style.color = '#98a2b3';
+        if (s && s.status === 'DONE') { btn.title = (s.by || '') + (s.source === 'LINE' ? '（依客戶 LINE 傳來的資料自動標記）' : '') + '（點一下修改日期或清除）'; btn.style.color = 'var(--ok)'; } else btn.style.color = '#98a2b3';
         btn.disabled = !r.applicable || d.period.status !== 'OPEN' || !d.caps.canWrite;
         btn.onclick = function () {
           if (s && s.status === 'DONE') stepDialog(r, code, s);
