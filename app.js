@@ -1779,6 +1779,12 @@
     m.appendChild(tabs);
     m.appendChild(el('div', { class: 'muted', style: 'margin-bottom:8px' }, d.period.label + '｜客戶還沒綁定 LINE 時走手動：按「複製訊息」→ 貼到客戶的 LINE 傳送 → 回來按「標記已手動傳送」才會記錄。'));
     if (d.stale) m.appendChild(el('div', { class: 'alert' }, '唯讀模式：' + d.staleMessage));
+    if (!d.sendEnabled) m.appendChild(el('div', { class: 'muted', style: 'margin-bottom:8px' }, 'LINE 自動發送尚未開啟（超級管理員在「模組設定」頁開啟後，已綁定 LINE 的客戶可直接發送）。'));
+    var needPoll = d.todo.concat(d.sent).some(function (r) { return r.queue && (r.queue.status === 'QUEUED' || r.queue.status === 'SENDING'); });
+    if (needPoll && !(window.__noticePoll)) {
+      window.__noticePoll = 1;
+      setTimeout(function () { window.__noticePoll = 0; if ($('overlay').classList.contains('hidden')) return; if ($('modal').innerText.indexOf('發送通知') !== 0) return; noticeDialog(d.kind, d.kind === 'BILL' ? d.paymentDeadline : undefined); }, 6000);
+    }
 
     var dueInput = null;
     if (d.kind === 'BILL') {
@@ -1793,8 +1799,14 @@
     }
 
     var count = el('span', { class: 'muted' });
-    function updateCount() { var n = Object.keys(ticked).length; count.textContent = '已勾選 ' + n + ' 家'; mark.disabled = !n || !d.canWrite; }
-    var mark = el('button', { class: 'btn' }, '標記已手動傳送');
+    function lineIds() { return Object.keys(ticked).filter(function (id) { var r = rowOf[id]; return r.recipients > 0 && !(r.queue && (r.queue.status === 'QUEUED' || r.queue.status === 'SENDING')); }); }
+    function updateCount() {
+      var n = Object.keys(ticked).length, ln = lineIds().length;
+      count.textContent = '已勾選 ' + n + ' 家（可 LINE 發送 ' + ln + ' 家）';
+      mark.disabled = !n || !d.canWrite; sendBtn.disabled = !ln || !d.canWrite || !d.sendEnabled;
+    }
+    var mark = el('button', { class: 'btn secondary' }, '標記已手動傳送');
+    var sendBtn = el('button', { class: 'btn' }, '發送所選（LINE）'); sendBtn.title = d.sendEnabled ? '' : 'LINE 自動發送尚未開啟（超級管理員在模組設定頁開啟）';
 
     function rowLine(r, parent, isSent) {
       var line = el('div', { style: 'border-top:1px solid var(--line);padding:6px 0' });
@@ -1808,6 +1820,11 @@
       if (info.length) top.appendChild(el('span', {}, info.join('　')));
       if (r.amountChanged) top.appendChild(el('span', { class: 'badge warn' }, '金額已變動：原 ' + r.amountChanged.from + '→' + r.amountChanged.to));
       if (r.anomaly) top.appendChild(el('span', { class: 'badge err' }, r.anomaly));
+      top.appendChild(el('span', { class: 'badge ' + (r.recipients ? 'ok' : 'off'), title: r.recipients ? '系統會發給這家公司全部有效的 LINE 綁定帳號' : '還沒有綁定 LINE，請用複製訊息' }, r.recipients ? ('LINE ×' + r.recipients) : '未綁定'));
+      if (r.queue) {
+        var QS = { QUEUED: '排隊中', SENDING: '發送中', SENT: '已送出', FAILED: '失敗' };
+        top.appendChild(el('span', { class: 'badge ' + (r.queue.status === 'FAILED' ? 'err' : (r.queue.status === 'SENT' ? 'ok' : 'warn')), title: r.queue.error || '' }, (QS[r.queue.status] || r.queue.status) + (r.queue.status === 'FAILED' && r.queue.error ? '：' + r.queue.error.slice(0, 40) : '') + (r.queue.status === 'QUEUED' && r.queue.attempts > 0 ? '（第 ' + r.queue.attempts + ' 次失敗，稍後重試）' : '')));
+      }
       var sp = el('span', { style: 'flex:1' }); top.appendChild(sp);
       var pv = el('button', { class: 'linkbtn' }, '預覽'), cp = el('button', { class: 'btn small secondary' }, '複製訊息'), tip = el('span', { class: 'muted', style: 'font-size:12px' });
       var msg = el('div', { style: 'display:none;white-space:pre-wrap;background:#f6f8fb;border-radius:6px;padding:8px;margin:6px 0 0 26px;font-size:13px' }, r.message);
@@ -1852,8 +1869,31 @@
         noticeDialog(d.kind, dueInput ? dueInput.value : undefined);
       }, function (e) { mark.disabled = false; msgBox.textContent = ''; alert(e.message); });
     };
+    sendBtn.onclick = function () {
+      var ids = lineIds();
+      if (!ids.length) return;
+      if (d.kind === 'BILL' && !(dueInput && dueInput.value)) return alert('請先填寫本批付款期限。');
+      var people = 0; ids.forEach(function (id) { people += rowOf[id].recipients; });
+      sendBtn.disabled = true; msgBox.textContent = '查詢本月 LINE 用量…';
+      call('tax.noticeUsage', {}, function (u) {
+        var usage = u && u.ok ? ('本月已用 ' + u.used + ' 則' + (u.limit != null ? '／上限 ' + u.limit + ' 則' : '（無上限）')) : '暫時查不到本月用量';
+        var short = u && u.ok && u.limit != null && u.used + people > u.limit;
+        msgBox.textContent = '';
+        if (!confirm('即將用 LINE 發送「' + d.label + '」給 ' + ids.length + ' 家公司（共 ' + people + ' 位收件人，約使用 ' + people + ' 則）。\n' + usage + (short ? '\n\n警告：加上這一批會超過本月上限！' : '') + '\n\n確定發送？')) { updateCount(); return; }
+        msgBox.textContent = '送出中…';
+        call('tax.sendNotices', {
+          kind: d.kind, paymentDeadline: dueInput ? dueInput.value : undefined,
+          items: ids.map(function (id) { return { filingId: id, updatedAt: rowOf[id].updatedAt }; })
+        }, function (res) {
+          var bad = res.results.filter(function (x) { return !x.ok; });
+          if (bad.length) alert(bad.length + ' 家沒有排入發送：' + bad[0].message);
+          if (res.queued) call('tax.noticeKick', {}, function () {}, function () {}); // 啟動發送（失敗也沒關係，每分鐘會自動輪詢）
+          noticeDialog(d.kind, dueInput ? dueInput.value : undefined);
+        }, function (e) { msgBox.textContent = ''; updateCount(); alert(e.message); });
+      }, function () { msgBox.textContent = ''; updateCount(); alert('查詢 LINE 用量失敗，請稍後再試。'); });
+    };
     updateCount();
-    foot.appendChild(count); foot.appendChild(msgBox); foot.appendChild(close); foot.appendChild(mark);
+    foot.appendChild(count); foot.appendChild(msgBox); foot.appendChild(close); foot.appendChild(mark); foot.appendChild(sendBtn);
     m.appendChild(foot);
   }
   $('taxNoticeBtn').onclick = function () { if (!taxData || !taxData.period) return alert('請先開啟期別。'); noticeDialog('NOTICE1'); };
@@ -1874,6 +1914,9 @@
       num('第一次通知的發票截止日（幾日前）', 'invoiceDay1', '訊息裡的 {截止日}。');
       num('第二次通知的發票截止日', 'invoiceDay2');
       num('催款天數（請款通知後幾天沒回報匯款才催）', 'dunDays');
+      var sw = el('input', { type: 'checkbox' }); sw.checked = !!s.lineSendEnabled; sw.onchange = function () { s.lineSendEnabled = sw.checked; };
+      var swl = el('label', { style: 'display:flex;gap:8px;align-items:center;margin-bottom:6px' }); swl.appendChild(sw); swl.appendChild(el('span', {}, '開啟 LINE 自動發送（關閉時，發送清單只能複製訊息；已排隊的訊息會保留、不會發出）'));
+      c.appendChild(swl);
       var bn = el('textarea', { rows: '3', style: 'width:100%' }); bn.value = s.bankNote; bn.oninput = function () { s.bankNote = bn.value; };
       field(c, '匯款帳號說明（放進請款通知；留空則不顯示）', bn);
       var ph = r.placeholders.map(function (x) { return '{' + x + '}'; }).join(' ');
