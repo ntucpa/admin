@@ -97,7 +97,7 @@
   }
 
   /** 只讀取、不寫入的動作：遇到 Google 連線錯誤時可安全地自動重試 */
-  var READ_ONLY = { ping: 1, loginUrl: 1, getHome: 1, getSettings: 1, listCompanies: 1, getUnclassifiedFolder: 1, listAdmins: 1, checkEmail: 1, listBindings: 1, listCustomers: 1, customerHistory: 1, listInvites: 1, listUnclassified: 1, listExceptions: 1, takeoverReport: 1, listAudit: 1, driveAudit: 1, previewCompanyImport: 1, listIntake: 1, listBackups: 1, 'tax.getBoard': 1, 'tax.getHome': 1, 'tax.listProfiles': 1, 'tax.checkBills': 1, 'tax.getSettings': 1, 'tax.testClassify': 1, 'tax.billsStatus': 1 };
+  var READ_ONLY = { ping: 1, loginUrl: 1, getHome: 1, getSettings: 1, listCompanies: 1, getUnclassifiedFolder: 1, listAdmins: 1, checkEmail: 1, listBindings: 1, listCustomers: 1, customerHistory: 1, listInvites: 1, listUnclassified: 1, listExceptions: 1, takeoverReport: 1, listAudit: 1, driveAudit: 1, previewCompanyImport: 1, listIntake: 1, listBackups: 1, 'tax.getBoard': 1, 'tax.getHome': 1, 'tax.memoSummary': 1, 'tax.listProfiles': 1, 'tax.checkBills': 1, 'tax.getSettings': 1, 'tax.testClassify': 1, 'tax.billsStatus': 1 };
   var NET_ERR = 'Google 連線暫時不穩，請稍後再試一次。若是儲存或新增，請先重新整理頁面確認是否已完成，避免重複操作。';
 
   function post(url, body) {
@@ -221,7 +221,24 @@
     document.querySelectorAll('.super-only').forEach(function (n) { n.classList.toggle('hidden', me.role !== 'SUPER_ADMIN'); });
     document.querySelectorAll('nav a[data-feature]').forEach(function (n) { n.classList.toggle('hidden', (me.features || []).indexOf(n.getAttribute('data-feature')) < 0); });
     renderHome(home);
+    refreshMemoBadge();
   }
+
+  /** 頂列備忘圖示（所有頁面可見）：灰＝沒有未完成；黃底加數字＝有未完成；紅底「今天到期 N」＝有到期或過期。沒有稅務權限者不顯示 */
+  var scrollToMemo = false;
+  function refreshMemoBadge() {
+    var b = $('memoBtn');
+    call('tax.memoSummary', {}, function (r) {
+      b.classList.remove('hidden');
+      var style = 'border:1px solid #cfd6df;background:#f2f4f7;color:#667085;font-weight:400;', text = '📝 備忘';
+      if (r.due > 0) { style = 'border:1px solid #c0392b;background:#c0392b;color:#fff;font-weight:700;'; text = '📝 今天到期 ' + r.due; }
+      else if (r.open > 0) { style = 'border:1px solid #ecd987;background:#fff2b8;color:#6b5400;font-weight:700;'; text = '📝 備忘 ' + r.open; }
+      b.style.cssText = 'margin-right:8px;border-radius:14px;padding:2px 10px;font-size:13px;' + style;
+      b.textContent = text;
+      b.title = r.open ? ('未完成 ' + r.open + ' 則' + (r.due ? '，其中 ' + r.due + ' 則已到期' : '')) : '沒有未完成的備忘';
+    }, function () { b.classList.add('hidden'); });
+  }
+  $('memoBtn').onclick = function () { scrollToMemo = true; go('tax'); if (taxHomeData) { renderTaxHome(); } };
 
   /* ---------- 首頁 ---------- */
   function renderHome(home) {
@@ -1755,6 +1772,7 @@
     }
 
     box.appendChild(renderMemoBox(h));
+    if (scrollToMemo) { scrollToMemo = false; var mb0 = $('taxMemoBox'); if (mb0) mb0.scrollIntoView(); }
 
     var grid = el('div', { style: 'display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;margin-bottom:10px' });
     h.cards.forEach(function (c) {
@@ -1810,15 +1828,34 @@
     var box = el('div', { style: 'background:#fff7d6;border:1px solid #ecd987;border-radius:8px;padding:10px 14px;margin-bottom:10px' });
     var open = h.memos.filter(function (m) { return !m.done; }).length;
     box.appendChild(el('div', { style: 'font-weight:700;color:#8a6d00;margin-bottom:6px' }, '我的備忘（' + open + ' 則待辦）'));
-    function save(args) { call('tax.saveMemo', args, function () { loadTaxHome(taxData && taxData.period && taxData.period.periodId); }, function (e) { alert(e.message); }); }
-    h.memos.forEach(function (m) {
+    box.id = 'taxMemoBox';
+    function save(args) { call('tax.saveMemo', args, function () { loadTaxHome(taxData && taxData.period && taxData.period.periodId); refreshMemoBadge(); }, function (e) { alert(e.message); }); }
+    function postpone(m) {
+      var md = openModal('延後備忘');
+      md.appendChild(el('div', { style: 'margin-bottom:8px' }, m.text));
+      var di = el('input', { type: 'date' }), t = new Date(Date.now() + 86400000), p2 = function (n) { return ('0' + n).slice(-2); };
+      di.value = t.getFullYear() + '-' + p2(t.getMonth() + 1) + '-' + p2(t.getDate()); field(md, '延後到', di);
+      modalActions(md, '儲存', function (fail) { if (!di.value) return fail('請選日期'); call('tax.saveMemo', { memoId: m.memoId, dueDate: di.value }, function () { closeModal(); loadTaxHome(taxData && taxData.period && taxData.period.periodId); refreshMemoBadge(); }, function (e) { fail(e.message); }); });
+    }
+    var shown = h.memos.filter(function (m) { return !m.done; }), folded = shown.length > 5, doneList = h.memos.filter(function (m) { return m.done; });
+    var list = shown.slice(0, 5), rest = shown.slice(5).concat(doneList);
+    if (!folded) list = shown.concat(doneList), rest = [];
+    function addLine(m, parent) {
       var line = el('div', { style: 'display:flex;align-items:center;gap:8px;padding:3px 0' });
       var cb = el('input', { type: 'checkbox' }); cb.checked = m.done; cb.onchange = function () { save({ memoId: m.memoId, done: cb.checked }); };
       var late = !m.done && m.dueDate && m.dueDate <= h.today;
       var tx = el('span', { style: 'flex:1;' + (m.done ? 'text-decoration:line-through;color:#8a8a8a' : (late ? 'font-weight:700;color:var(--danger)' : '')) }, m.text + (m.dueDate ? '　（' + m.dueDate + '）' : ''));
       var del = el('button', { class: 'linkbtn', title: '刪除' }, '✕'); del.onclick = function () { if (confirm('刪除這則備忘？')) save({ memoId: m.memoId, remove: true }); };
-      line.appendChild(cb); line.appendChild(tx); line.appendChild(del); box.appendChild(line);
-    });
+      line.appendChild(cb); line.appendChild(tx);
+      if (!m.done) { var pp = el('button', { class: 'linkbtn', title: '延後' }, '延後'); pp.onclick = function () { postpone(m); }; line.appendChild(pp); }
+      line.appendChild(del); parent.appendChild(line);
+    }
+    list.forEach(function (m) { addLine(m, box); });
+    if (rest.length) {
+      var more = el('details', { style: 'margin-top:4px' });
+      more.appendChild(el('summary', { style: 'cursor:pointer;color:#8a6d00' }, '還有 ' + rest.length + ' 則'));
+      rest.forEach(function (m) { addLine(m, more); }); box.appendChild(more);
+    }
     var add = el('div', { style: 'display:flex;gap:6px;flex-wrap:wrap;margin-top:6px' });
     var ti = el('input', { type: 'text', maxlength: '200', placeholder: '新增備忘…（不綁客戶，只有您看得到）', style: 'flex:1;min-width:200px' });
     var di = el('input', { type: 'date', style: 'width:auto' });
