@@ -218,6 +218,7 @@
           <div id="taxNotice" class="alert hidden"></div>
           <div class="toolbar" id="taxPeriodBar"></div>
           <div class="toolbar">
+            <button id="taxViewB" class="btn small">B 整理進度</button><button id="taxViewA" class="btn small secondary">A 待辦追蹤</button>
             <input type="text" id="taxSearch" placeholder="搜尋統編、簡稱、公司名稱">
             <select id="taxFilter" style="width:auto"></select>
             <button id="taxAddBtn" class="btn small secondary">加入公司</button>
@@ -229,8 +230,10 @@
             <button id="taxMarkBtn" class="btn small">標記完成</button>
             <button id="taxClearBtn" class="btn small secondary">取消標記</button>
             <button id="taxNaBtn" class="btn small danger">標為不適用</button>
+            <button id="taxExclBtn" class="btn small danger">設為非營業稅申報</button>
           </div>
           <div class="card"><div id="taxBox">載入中…</div></div>
+          <div id="taxExcluded"></div>
         </section>
 
         <section id="page-taxup" class="hidden">
@@ -331,8 +334,8 @@
 
   <div id="overlay" class="overlay hidden"><div class="modal" id="modal"></div></div>
 
-  <script src="bill-parser.js?v=0.15.1"></script>
-  <script src="config.js?v=0.15.1"></script>
-  <script src="app.js?v=0.15.1"></script>
+  <script src="bill-parser.js?v=0.16.0"></script>
+  <script src="config.js?v=0.16.0"></script>
+  <script src="app.js?v=0.16.0"></script>
 </body>
 </html>
