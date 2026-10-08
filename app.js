@@ -1191,6 +1191,9 @@
         tr.appendChild(el('td', {}, i.createdBy));
         var op = el('td');
         if (i.status === 'ACTIVE') {
+          var vw = el('button', { class: 'btn small secondary', style: 'margin-right:6px' }, '查看連結');
+          vw.onclick = function () { vw.disabled = true; call('getInviteLink', { inviteId: i.inviteId }, function (r) { vw.disabled = false; showInvite(r, '邀請連結'); }, function (e) { vw.disabled = false; alert(e.message); }); };
+          op.appendChild(vw);
           var r = el('button', { class: 'btn small danger' }, '撤銷');
           r.onclick = function () { if (confirm('確定撤銷「' + i.companyName + '」的邀請連結？撤銷後客戶將無法使用。')) call('revokeInvite', { inviteId: i.inviteId }, loadInvites); };
           op.appendChild(r);
@@ -1237,37 +1240,27 @@
   };
 
   function createInvite(companyId, fail) {
-    call('createInvite', { companyId: companyId }, function (r) {
-      var m = openModal('邀請連結已建立');
-      m.appendChild(el('div', {}, '公司：' + r.companyName));
-      var box = el('div', { class: 'linkbox' });
-      var input = el('input', { type: 'text', readonly: 'readonly' }); input.value = r.url;
-      var copy = el('button', { class: 'btn' }, '複製連結');
-      copy.onclick = function () {
-        input.select();
-        var done = function () { copy.textContent = '已複製 ✓'; };
-        if (navigator.clipboard) navigator.clipboard.writeText(r.url).then(done, function () { document.execCommand('copy'); done(); });
-        else { document.execCommand('copy'); done(); }
-      };
-      if (!r.oaUrl) { box.appendChild(input); box.appendChild(copy); m.appendChild(box); } // 查得到官方帳號連結時，只顯示下方的「兩步驟訊息」（已含綁定連結）
-      m.appendChild(el('p', { class: 'muted' }, (r.oaUrl ? '請直接傳下面的「兩步驟訊息」給客戶' : '請把連結用 LINE 傳給客戶') + '，客戶需在手機 LINE 裡點開。有效期限至 ' + fmtTime(r.expireAt) + '，只能使用一次。'));
-      if (r.oaUrl) {
-        var msgText = '您好，請依下列兩步驟完成綁定：' + String.fromCharCode(10) + '1. 先加入我們的官方帳號：' + r.oaUrl + String.fromCharCode(10) + '2. 再點這個連結綁定公司（只能使用一次）：' + r.url;
-        var ta = el('textarea', { rows: '5', readonly: 'readonly', style: 'width:100%' }); ta.value = msgText;
-        var cp2 = el('button', { class: 'btn secondary' }, '複製「兩步驟訊息」（含官方帳號連結）');
-        cp2.onclick = function () {
-          ta.select();
-          var done2 = function () { cp2.textContent = '已複製 ✓'; };
-          if (navigator.clipboard) navigator.clipboard.writeText(msgText).then(done2, function () { document.execCommand('copy'); done2(); });
-          else { document.execCommand('copy'); done2(); }
-        };
-        m.appendChild(el('div', { class: 'muted', style: 'margin-top:8px' }, '客戶只點邀請連結只是啟用綁定，沒有加官方帳號就收不到訊息。建議直接傳下面這則：'));
-        m.appendChild(ta); m.appendChild(cp2);
-      }
-      m.appendChild(el('div', { class: 'alert' }, '為了安全，連結只會顯示這一次，關閉後無法再查看。若遺失，請撤銷後重新建立。'));
-      var bar = el('div', { class: 'actions' }); var close = el('button', { class: 'btn secondary' }, '關閉');
-      close.onclick = function () { closeModal(); loadInvites(); }; bar.appendChild(close); m.appendChild(bar);
-    }, function (e) { if (fail) fail(e.message); else alert(e.message); });
+    call('createInvite', { companyId: companyId }, function (r) { showInvite(r, '邀請連結已建立'); }, function (e) { if (fail) fail(e.message); else alert(e.message); });
+  }
+
+  function showInvite(r, title) {
+    var m = openModal(title);
+    m.appendChild(el('div', {}, '公司：' + r.companyName));
+    var copyTo = function (btn, text, label) {
+      var done = function () { btn.textContent = '已複製 ✓'; setTimeout(function () { btn.textContent = label; }, 2000); };
+      if (navigator.clipboard) navigator.clipboard.writeText(text).then(done, function () { document.execCommand('copy'); done(); });
+      else { document.execCommand('copy'); done(); }
+    };
+    var msgText = r.oaUrl
+      ? '您好，請依下列兩步驟完成綁定：' + String.fromCharCode(10) + '1. 先加入我們的官方帳號：' + r.oaUrl + String.fromCharCode(10) + '2. 再點這個連結綁定公司（只能使用一次）：' + r.url
+      : r.url;
+    var ta = el('textarea', { rows: r.oaUrl ? '5' : '3', readonly: 'readonly', style: 'width:100%;margin-top:8px' }); ta.value = msgText;
+    var cp = el('button', { class: 'btn' }, '複製訊息');
+    cp.onclick = function () { ta.select(); copyTo(cp, msgText, '複製訊息'); };
+    m.appendChild(el('p', { class: 'muted' }, '有效期限至 ' + fmtTime(r.expireAt) + '，只能使用一次。連結在過期或客戶綁定前，隨時可在邀請清單按「查看連結」再取得。'));
+    m.appendChild(ta); m.appendChild(cp);
+    var bar = el('div', { class: 'actions' }); var close = el('button', { class: 'btn secondary' }, '關閉');
+    close.onclick = function () { closeModal(); loadInvites(); }; bar.appendChild(close); m.appendChild(bar);
   }
 
   /* ---------- 管理員管理 ---------- */
