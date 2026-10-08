@@ -100,8 +100,11 @@
   var READ_ONLY = { ping: 1, loginUrl: 1, getHome: 1, getSettings: 1, listCompanies: 1, getUnclassifiedFolder: 1, listAdmins: 1, checkEmail: 1, listBindings: 1, listCustomers: 1, customerHistory: 1, listInvites: 1, listUnclassified: 1, listExceptions: 1, takeoverReport: 1, listAudit: 1, driveAudit: 1, previewCompanyImport: 1, listIntake: 1, listBackups: 1, 'tax.getBoard': 1, 'tax.getHome': 1, 'tax.getNoticeList': 1, 'tax.getRecipients': 1, 'tax.getNoticeSettings': 1, 'tax.memoSummary': 1, 'tax.listProfiles': 1, 'tax.checkBills': 1, 'tax.getSettings': 1, 'tax.testClassify': 1, 'tax.billsStatus': 1 };
   var NET_ERR = 'Google 連線暫時不穩，請稍後再試一次。若是儲存或新增，請先重新整理頁面確認是否已完成，避免重複操作。';
 
-  function post(url, body) {
-    return fetch(url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(body) })
+  /** timeoutMs>0：等太久就放棄（讀取類動作由 api() 馬上重試）。Apps Script 窗口實測約每 4 次有 1 次要等 10～30 秒才失敗，與其乾等不如快速放棄重來 */
+  function post(url, body, timeoutMs) {
+    var opts = { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(body) };
+    if (timeoutMs > 0 && typeof AbortSignal !== 'undefined' && AbortSignal.timeout) opts.signal = AbortSignal.timeout(timeoutMs);
+    return fetch(url, opts)
       .then(function (r) {
         if (!r.ok) throw { code: 'NETWORK', message: NET_ERR };
         var route = r.headers.get('x-yc-route') || '';
@@ -109,9 +112,9 @@
       }, function () { throw { code: 'NETWORK', message: NET_ERR }; });
   }
 
-  function once(name, args, t0) {
+  function once(name, args, t0, tmo) {
     var action = 'admin.' + name;
-    var direct = function () { return post(API_URL, { action: action, token: token, args: args || {} }); };
+    var direct = function () { return post(API_URL, { action: action, token: token, args: args || {} }, tmo); };
     var p;
     if (GATEWAY_URL && GATEWAY_ACTIONS[name]) {
       p = ensureJwt().then(function (j) { return post(GATEWAY_URL, { action: action, token: token, jwt: j, args: args || {} }); })
@@ -130,9 +133,10 @@
   /** 呼叫後端 AdminApi；回傳 Promise<data>，失敗時 reject {code, message}。讀取類動作遇連線錯誤自動重試 2 次 */
   function api(name, args) {
     var t0 = Date.now();
-    var tries = READ_ONLY[name] ? 3 : 1;
+    var tries = READ_ONLY[name] ? 4 : 1;
+    var LIMITS = [9000, 12000, 15000, 20000]; // 讀取類每次嘗試的最長等待（毫秒）；寫入類不設限（避免重複寫入）
     function attempt(n) {
-      return once(name, args, t0).then(null, function (err) {
+      return once(name, args, t0, READ_ONLY[name] ? LIMITS[n - 1] : 0).then(null, function (err) {
         if (err.code === 'NETWORK' && n < tries) return attempt(n + 1);
         throw err;
       });
