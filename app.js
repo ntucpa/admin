@@ -1629,8 +1629,8 @@
     var d = taxData, box = $('taxBox'); box.innerHTML = '';
     if (!d.period) { box.textContent = d.caps.isSuper ? '請先按「客戶資料」勾選營業稅客戶，再按「開啟新期別」。' : '尚未開啟任何期別，請聯絡超級管理員。'; updateTaxBatch(); return; }
     var rows = taxVisibleRows();
-    var t = el('table', { style: 'min-width:780px' }), cg = el('colgroup'); box.style.overflowX = 'auto';
-    ['34px', '95px', '', '110px'].concat(d.steps.map(function () { return '84px'; })).forEach(function (w) { cg.appendChild(el('col', w ? { style: 'width:' + w } : {})); }); t.appendChild(cg);
+    var t = el('table', { style: 'min-width:1050px' }), cg = el('colgroup'); box.style.overflowX = 'auto';
+    ['34px', '95px', '130px', '90px'].concat(d.steps.map(function () { return '84px'; })).forEach(function (w) { cg.appendChild(el('col', w ? { style: 'width:' + w } : {})); }); t.appendChild(cg);
     var h = el('tr'), all = el('input', { type: 'checkbox' });
     all.onchange = function () { rows.forEach(function (r) { if (r.applicable) { if (all.checked) taxSel[r.filingId] = 1; else delete taxSel[r.filingId]; } }); renderTaxTable(); };
     var th0 = el('th'); th0.appendChild(all); h.appendChild(th0);
