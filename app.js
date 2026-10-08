@@ -971,7 +971,7 @@
         '上次下載到地端：' + (h.ackAt ? fmtTime(h.ackAt) : '尚未記錄') + (h.ackOverdue ? '（已超過 35 天，請把「系統備份」資料夾下載到地端電腦，再按「已下載到地端」）' : '') + '｜' + d.keepNote));
       var t = el('table'); var hr = el('tr');
       ['備份', '種類', '建立時間', '開啟'].forEach(function (x) { hr.appendChild(el('th', {}, x)); }); t.appendChild(hr);
-      var KIND = { DB: '資料庫', INV: '檔案清單', SNAPSHOT: '還原前快照' };
+      var KIND = { DB: '資料庫', TAX: '稅務資料', INV: '檔案清單', SNAPSHOT: '還原前快照' };
       d.items.forEach(function (i) {
         var tr = el('tr');
         tr.appendChild(el('td', {}, i.name)); tr.appendChild(el('td', {}, KIND[i.type] || i.type)); tr.appendChild(el('td', {}, fmtTime(i.createdAt)));
@@ -979,7 +979,7 @@
       });
       box.appendChild(t);
       var fsel = $('backupRestoreFile'); fsel.innerHTML = '';
-      d.items.filter(function (i) { return i.type === 'DB'; }).forEach(function (i) { fsel.appendChild(el('option', { value: i.id }, i.name)); });
+      d.items.filter(function (i) { return i.type === 'DB' || i.type === 'TAX'; }).forEach(function (i) { fsel.appendChild(el('option', { value: i.id }, i.name)); });
       fillRestoreTables();
     }, function (err) { box.textContent = err.message; });
   }
@@ -987,8 +987,8 @@
     var tsel = $('backupRestoreTable'); tsel.innerHTML = '';
     if (!backupData || !backupData.tables) return;
     var opt = $('backupRestoreFile').selectedOptions[0];
-    var isLog = opt && opt.textContent.indexOf('日誌庫') === 0;
-    backupData.tables.filter(function (x) { return isLog ? x.db === 'log' : x.db === 'main'; }).forEach(function (x) { tsel.appendChild(el('option', { value: x.name }, x.name)); });
+    var isLog = opt && opt.textContent.indexOf('日誌庫') === 0, isTax = opt && opt.textContent.indexOf('稅務資料') === 0;
+    backupData.tables.filter(function (x) { return isTax ? x.db === 'tax' : (isLog ? x.db === 'log' : x.db === 'main'); }).forEach(function (x) { tsel.appendChild(el('option', { value: x.name }, x.name)); });
   }
   $('backupRestoreFile').onchange = fillRestoreTables;
   $('backupReload').onclick = loadBackup;
@@ -1041,10 +1041,15 @@
     if (!fileId || !table) { alert('請選擇備份與資料表'); return; }
     var confirmText = '';
     if (mode === 'replace') {
-      confirmText = prompt('您要用「' + $('backupRestoreFile').selectedOptions[0].textContent + '」取代現行的「' + table + '」資料表。\n系統會先把現行試算表另存到「還原前快照」。\n\n請輸入「還原」二字確認：') || '';
+      var isTaxFile = $('backupRestoreFile').selectedOptions[0].textContent.indexOf('稅務資料') === 0;
+      confirmText = prompt('您要用「' + $('backupRestoreFile').selectedOptions[0].textContent + '」取代現行的「' + table + '」資料表。\n系統會先把現行' + (isTaxFile ? '這張資料表' : '試算表') + '另存到「還原前快照」。\n\n請輸入「還原」二字確認：') || '';
       if (confirmText !== '還原') { alert('已取消'); return; }
     }
     call('backupRestoreTable', { fileId: fileId, table: table, mode: mode, confirm: confirmText }, function (r) {
+      if (r.mode === 'preview' && r.backupRows !== undefined) {
+        alert('「' + r.table + '」預覽（現行資料沒有變動）：\n備份 ' + r.backupRows + ' 列、現行 ' + r.currentRows + ' 列\n只在備份裡：' + r.onlyInBackup + ' 列（還原後會出現）\n只在現行：' + r.onlyInCurrent + ' 列（還原後會消失）\n內容不同：' + r.changed + ' 列（還原後會變回備份的內容）');
+        return;
+      }
       alert(r.mode === 'preview' ? '已在現行試算表新增分頁「' + r.sheet + '」（' + r.rows + ' 列），請到試算表檢視，現行資料沒有變動。' : '已還原 ' + r.rows + ' 列；還原前的試算表已另存為「' + r.snapshot + '」。');
     });
   };
