@@ -1232,6 +1232,19 @@
       };
       box.appendChild(input); box.appendChild(copy); m.appendChild(box);
       m.appendChild(el('p', { class: 'muted' }, '請把連結用 LINE 傳給客戶，客戶需在手機 LINE 裡點開。有效期限至 ' + fmtTime(r.expireAt) + '，只能使用一次。'));
+      if (r.oaUrl) {
+        var msgText = '您好，請依下列兩步驟完成綁定：' + String.fromCharCode(10) + '1. 先加入我們的官方帳號：' + r.oaUrl + String.fromCharCode(10) + '2. 再點這個連結綁定公司（只能使用一次）：' + r.url;
+        var ta = el('textarea', { rows: '5', readonly: 'readonly', style: 'width:100%' }); ta.value = msgText;
+        var cp2 = el('button', { class: 'btn secondary' }, '複製「兩步驟訊息」（含官方帳號連結）');
+        cp2.onclick = function () {
+          ta.select();
+          var done2 = function () { cp2.textContent = '已複製 ✓'; };
+          if (navigator.clipboard) navigator.clipboard.writeText(msgText).then(done2, function () { document.execCommand('copy'); done2(); });
+          else { document.execCommand('copy'); done2(); }
+        };
+        m.appendChild(el('div', { class: 'muted', style: 'margin-top:8px' }, '客戶只點邀請連結只是啟用綁定，沒有加官方帳號就收不到訊息。建議直接傳下面這則：'));
+        m.appendChild(ta); m.appendChild(cp2);
+      }
       m.appendChild(el('div', { class: 'alert' }, '為了安全，連結只會顯示這一次，關閉後無法再查看。若遺失，請撤銷後重新建立。'));
       var bar = el('div', { class: 'actions' }); var close = el('button', { class: 'btn secondary' }, '關閉');
       close.onclick = function () { closeModal(); loadInvites(); }; bar.appendChild(close); m.appendChild(bar);
