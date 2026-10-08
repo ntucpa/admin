@@ -97,7 +97,7 @@
   }
 
   /** 只讀取、不寫入的動作：遇到 Google 連線錯誤時可安全地自動重試 */
-  var READ_ONLY = { ping: 1, loginUrl: 1, getHome: 1, getSettings: 1, listCompanies: 1, getUnclassifiedFolder: 1, listAdmins: 1, checkEmail: 1, listBindings: 1, listCustomers: 1, customerHistory: 1, listInvites: 1, listUnclassified: 1, listExceptions: 1, takeoverReport: 1, listAudit: 1, driveAudit: 1, previewCompanyImport: 1, listIntake: 1, listBackups: 1, 'tax.getBoard': 1, 'tax.getHome': 1, 'tax.getNoticeList': 1, 'tax.getRecipients': 1, 'tax.getNoticeSettings': 1, 'tax.memoSummary': 1, 'tax.listProfiles': 1, 'tax.checkBills': 1, 'tax.getSettings': 1, 'tax.testClassify': 1, 'tax.billsStatus': 1 };
+  var READ_ONLY = { ping: 1, loginUrl: 1, getHome: 1, getSettings: 1, listCompanies: 1, getUnclassifiedFolder: 1, listAdmins: 1, checkEmail: 1, listBindings: 1, listCustomers: 1, customerHistory: 1, listInvites: 1, listUnclassified: 1, listExceptions: 1, takeoverReport: 1, listAudit: 1, driveAudit: 1, previewCompanyImport: 1, listIntake: 1, listBackups: 1, 'tax.getBoard': 1, 'tax.getHome': 1, 'tax.getNoticeList': 1, 'tax.getRecipients': 1, 'tax.getNoticeSettings': 1, 'tax.getDocSettings': 1, 'tax.memoSummary': 1, 'tax.listProfiles': 1, 'tax.checkBills': 1, 'tax.getSettings': 1, 'tax.testClassify': 1, 'tax.billsStatus': 1 };
   var NET_ERR = 'Google 連線暫時不穩，請稍後再試一次。若是儲存或新增，請先重新整理頁面確認是否已完成，避免重複操作。';
 
   /** timeoutMs>0：等太久就放棄（讀取類動作由 api() 馬上重試）。Apps Script 窗口實測約每 4 次有 1 次要等 10～30 秒才失敗，與其乾等不如快速放棄重來 */
@@ -2019,6 +2019,35 @@
     }, function (e) { box.textContent = e.message; });
   }
 
+  /* ---------- 申報書與回執自動讀取設定（模組設定頁，僅超管）：AI 備援開關、模型、起始期別 ---------- */
+  function renderDocSettings() {
+    var box = $('setDocBox'); box.innerHTML = '';
+    call('tax.getDocSettings', {}, function (r) {
+      var c = el('div', { class: 'card' }), s = { aiEnabled: r.aiEnabled, model: r.model, startPeriod: r.startPeriod };
+      c.appendChild(el('div', { class: 'card-title' }, '申報書與繳稅回執自動讀取'));
+      if (!r.canWrite) c.appendChild(el('div', { class: 'alert' }, '系統同步異常，目前只能查看，不能儲存。'));
+      c.appendChild(el('div', { class: 'muted', style: 'margin-bottom:8px' }, '系統會自動讀取客戶資料夾裡「營業稅申報書」與「繳稅證明／營業稅」的 PDF，填入申報日與繳稅日（人工填過的不會被蓋掉）。'));
+      var sp = el('input', { type: 'text', style: 'width:160px' }); sp.value = s.startPeriod; sp.oninput = function () { s.startPeriod = sp.value.trim(); };
+      field(c, '起始期別（早於這一期的文件完全不讀、不寫）', sp, '格式例如 VAT-115-09＝115 年 9–10 月；預設 ' + r.defaultStart + '。');
+      var sw = el('input', { type: 'checkbox' }); sw.checked = s.aiEnabled; sw.onchange = function () { s.aiEnabled = sw.checked; };
+      var swl = el('label', { style: 'display:flex;gap:8px;align-items:center;margin:10px 0 4px' }); swl.appendChild(sw);
+      swl.appendChild(el('span', {}, '程式讀不出來的文件，改請 Gemini（AI）讀取'));
+      c.appendChild(swl);
+      c.appendChild(el('div', { class: r.keySet ? 'muted' : 'alert', style: 'margin:0 0 8px 26px' },
+        r.keySet ? 'Gemini 金鑰：已設定。開啟後，只有程式讀不出來的申報書與回執會送到 Gemini；AI 讀出的結果要通過稅額與統編檢查才會填入，並標示「AI 讀取」請您抽查。'
+                 : 'Gemini 金鑰：尚未設定，開啟也不會送出任何文件。金鑰要由維護人員在 Cloudflare 以 wrangler secret put GEMINI_API_KEY 放入（不會經過這個網頁）。'));
+      var md = el('input', { type: 'text', style: 'width:260px' }); md.value = s.model; md.oninput = function () { s.model = md.value.trim(); };
+      field(c, 'AI 模型名稱', md, '預設 ' + r.defaultModel + '；要換模型直接改這裡。');
+      var save = el('button', { class: 'btn' }, '儲存'); save.disabled = !r.canWrite;
+      var out = el('span', { class: 'muted', style: 'margin-left:10px' });
+      save.onclick = function () {
+        save.disabled = true; out.textContent = '儲存中…';
+        call('tax.saveDocSettings', s, function () { save.disabled = false; out.textContent = '已儲存'; }, function (e) { save.disabled = false; out.textContent = e.message; });
+      };
+      c.appendChild(save); c.appendChild(out); box.appendChild(c);
+    }, function (e) { box.textContent = e.message; });
+  }
+
   /* ---------- 首頁區塊（P4）：期限列、異常、我的備忘、待辦卡片、整體進度、LINE 綁定進度 ---------- */
   var taxHomeData = null;
   function loadTaxHome(periodId) {
@@ -2649,7 +2678,7 @@
   var setData = null;
   function loadTaxSettings() {
     $('setBox').textContent = '載入中…';
-    call('tax.getSettings', {}, function (d) { setData = JSON.parse(JSON.stringify(d)); renderTaxSettings(); renderNoticeSettings(); }, function (e) { $('setBox').textContent = e.message; });
+    call('tax.getSettings', {}, function (d) { setData = JSON.parse(JSON.stringify(d)); renderTaxSettings(); renderNoticeSettings(); renderDocSettings(); }, function (e) { $('setBox').textContent = e.message; });
   }
   function renderTaxSettings() {
     var d = setData, box = $('setBox'); box.innerHTML = '';
