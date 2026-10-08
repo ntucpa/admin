@@ -1742,6 +1742,8 @@
         var last = lastStep(r, d.steps), info = [];
         if (last) info.push('最近完成：' + STEP_LABELS[last] + ' ' + r.steps[last].date.slice(5));
         if (stepDone(r, 'PAID_REPORTED') && !stepDone(r, 'RECONCILED')) info.push('客戶已回報匯款 ' + r.steps.PAID_REPORTED.date.slice(5));
+        if (r.reports && r.reports.INVOICES_DONE) info.push('✓客戶已確認傳完發票 ' + r.reports.INVOICES_DONE.slice(5));
+        if (r.reports && r.reports.NO_INVOICE) info.push('客戶回覆本期沒有發票 ' + r.reports.NO_INVOICE.slice(5));
         left.appendChild(el('div', { class: 'muted', style: 'font-size:12px' }, info.join('　·　')));
         line.appendChild(left);
         var next = STAGE_NEXT_STEP[code];
@@ -1855,7 +1857,7 @@
       }
       var sp = el('span', { style: 'flex:1' }); top.appendChild(sp);
       var pv = el('button', { class: 'linkbtn' }, '預覽'), cp = el('button', { class: 'btn small secondary' }, '複製訊息'), tip = el('span', { class: 'muted', style: 'font-size:12px' });
-      var msg = el('div', { style: 'display:none;white-space:pre-wrap;background:#f6f8fb;border-radius:6px;padding:8px;margin:6px 0 0 26px;font-size:13px' }, r.message);
+      var msg = el('div', { style: 'display:none;white-space:pre-wrap;background:#f6f8fb;border-radius:6px;padding:8px;margin:6px 0 0 26px;font-size:13px' }, r.recipients ? ('【LINE 版（下方會有按鈕）】' + String.fromCharCode(10) + r.lineMessage + String.fromCharCode(10) + String.fromCharCode(10) + '【手動複製版】' + String.fromCharCode(10) + r.message) : r.message);
       pv.onclick = function () { msg.style.display = msg.style.display === 'none' ? 'block' : 'none'; };
       cp.onclick = function () {
         copyText(r.message, function (ok) {
@@ -1948,7 +1950,8 @@
       var bn = el('textarea', { rows: '3', style: 'width:100%' }); bn.value = s.bankNote; bn.oninput = function () { s.bankNote = bn.value; };
       field(c, '匯款帳號說明（放進請款通知；留空則不顯示）', bn);
       var ph = r.placeholders.map(function (x) { return '{' + x + '}'; }).join(' ');
-      [['tplNotice1', '第一次通知訊息'], ['tplNotice2', '第二次通知訊息'], ['tplBill', '請款通知訊息'], ['tplDun', '催款訊息']].forEach(function (t) {
+      [['tplNotice1', '第一次通知訊息（手動複製版）'], ['tplNotice2', '第二次通知訊息（手動複製版）'], ['tplBill', '請款通知訊息（手動複製版）'], ['tplDun', '催款訊息（手動複製版）'],
+       ['tplLineNotice1', '第一次通知訊息（LINE 版，訊息下方有按鈕）'], ['tplLineNotice2', '第二次通知訊息（LINE 版）'], ['tplLineBill', '請款通知訊息（LINE 版）'], ['tplLineDun', '催款訊息（LINE 版）']].forEach(function (t) {
         var ta = el('textarea', { rows: '6', style: 'width:100%' }); ta.value = s[t[0]]; ta.oninput = function () { s[t[0]] = ta.value; };
         var reset = el('button', { class: 'linkbtn' }, '還原預設'); reset.onclick = function () { s[t[0]] = r.defaults[t[0]]; ta.value = s[t[0]]; };
         field(c, t[1], ta, '可用欄位：' + ph); c.lastChild.appendChild(reset);
@@ -2112,6 +2115,8 @@
       tr.appendChild(el('td', {}, r.companyId));
       var nm = el('td', { title: r.companyName }), nl = el('button', { class: 'linkbtn', style: 'text-decoration:none;color:inherit', title: '點一下查看或編輯備註' }, r.shortName || r.companyName);
       nl.onclick = function () { notesDialog(r); }; nm.appendChild(nl);
+      if (r.reports && r.reports.INVOICES_DONE) nm.appendChild(el('span', { class: 'badge ok', style: 'margin-left:6px', title: '客戶在 LINE 按了「我已傳完發票」' }, '✓客戶已確認傳完 ' + r.reports.INVOICES_DONE.slice(5)));
+      if (r.reports && r.reports.NO_INVOICE) nm.appendChild(el('span', { class: 'badge warn', style: 'margin-left:6px', title: '客戶在 LINE 按了「本期沒有發票」' }, '客戶回覆本期沒有發票 ' + r.reports.NO_INVOICE.slice(5)));
       if (r.note || r.taxNotes || r.bookkeepingNotes) { var ni = el('button', { class: 'linkbtn', style: 'text-decoration:none;margin-left:4px', title: [r.note, r.taxNotes, r.bookkeepingNotes].filter(Boolean).join('\n') }, 'ⓘ'); ni.onclick = function () { notesDialog(r); }; nm.appendChild(ni); }
       tr.appendChild(nm);
       var last = lastStep(r, d.steps);
