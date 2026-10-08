@@ -224,6 +224,7 @@
             <input type="text" id="taxSearch" placeholder="搜尋統編、簡稱、公司名稱">
             <select id="taxFilter" style="width:auto"></select>
             <button id="taxAddBtn" class="btn small secondary">加入公司</button>
+            <button id="taxNoticeBtn" class="btn small">發送通知</button>
           </div>
           <div class="toolbar hidden" id="taxBatch">
             <span id="taxSelCount" class="muted">已選 0 家</span>
@@ -257,6 +258,7 @@
         <section id="page-taxsettings" class="hidden">
           <h1>稅務模組設定 <button id="setBackBtn" class="btn small secondary">回稅務申報</button></h1>
           <div id="setBox">載入中…</div>
+          <div id="setNoticeBox"></div>
         </section>
 
         <section id="page-intake" class="hidden">
@@ -336,8 +338,8 @@
 
   <div id="overlay" class="overlay hidden"><div class="modal" id="modal"></div></div>
 
-  <script src="bill-parser.js?v=0.18.0"></script>
-  <script src="config.js?v=0.18.0"></script>
-  <script src="app.js?v=0.18.0"></script>
+  <script src="bill-parser.js?v=0.19.0"></script>
+  <script src="config.js?v=0.19.0"></script>
+  <script src="app.js?v=0.19.0"></script>
 </body>
 </html>

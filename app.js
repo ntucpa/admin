@@ -97,7 +97,7 @@
   }
 
   /** 只讀取、不寫入的動作：遇到 Google 連線錯誤時可安全地自動重試 */
-  var READ_ONLY = { ping: 1, loginUrl: 1, getHome: 1, getSettings: 1, listCompanies: 1, getUnclassifiedFolder: 1, listAdmins: 1, checkEmail: 1, listBindings: 1, listCustomers: 1, customerHistory: 1, listInvites: 1, listUnclassified: 1, listExceptions: 1, takeoverReport: 1, listAudit: 1, driveAudit: 1, previewCompanyImport: 1, listIntake: 1, listBackups: 1, 'tax.getBoard': 1, 'tax.getHome': 1, 'tax.memoSummary': 1, 'tax.listProfiles': 1, 'tax.checkBills': 1, 'tax.getSettings': 1, 'tax.testClassify': 1, 'tax.billsStatus': 1 };
+  var READ_ONLY = { ping: 1, loginUrl: 1, getHome: 1, getSettings: 1, listCompanies: 1, getUnclassifiedFolder: 1, listAdmins: 1, checkEmail: 1, listBindings: 1, listCustomers: 1, customerHistory: 1, listInvites: 1, listUnclassified: 1, listExceptions: 1, takeoverReport: 1, listAudit: 1, driveAudit: 1, previewCompanyImport: 1, listIntake: 1, listBackups: 1, 'tax.getBoard': 1, 'tax.getHome': 1, 'tax.getNoticeList': 1, 'tax.getNoticeSettings': 1, 'tax.memoSummary': 1, 'tax.listProfiles': 1, 'tax.checkBills': 1, 'tax.getSettings': 1, 'tax.testClassify': 1, 'tax.billsStatus': 1 };
   var NET_ERR = 'Google 連線暫時不穩，請稍後再試一次。若是儲存或新增，請先重新整理頁面確認是否已完成，避免重複操作。';
 
   function post(url, body) {
@@ -1745,6 +1745,153 @@
     box.appendChild(det);
   }
 
+
+  /* ---------- 發送清單（P5 第一步，M1 9.4）：四種通知共用；第一步只有手動路徑（複製訊息 → 貼到客戶 LINE → 標記已手動傳送） ---------- */
+  var NOTICE_TABS = [['NOTICE1', '第一次通知'], ['NOTICE2', '第二次通知'], ['BILL', '請款通知'], ['DUN', '催款']];
+  var CARD_NOTICE = { due1: 'NOTICE1', due2: 'NOTICE2', billNotify: 'BILL', dun: 'DUN' };
+
+  function copyText(text, done) {
+    function fallback() {
+      var ta = el('textarea', { style: 'position:fixed;left:-1000px;top:0' }); ta.value = text; document.body.appendChild(ta); ta.select();
+      var ok = false; try { ok = document.execCommand('copy'); } catch (e) { ok = false; } ta.remove(); done(ok);
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(function () { done(true); }, fallback);
+    else fallback();
+  }
+
+  function noticeDialog(kind, due) {
+    var m = openModal('發送通知'); $('modal').style.width = 'min(1040px,96vw)';
+    var box = el('div', { class: 'muted' }, '載入中…'); m.appendChild(box);
+    var periodId = taxData && taxData.period ? taxData.period.periodId : undefined;
+    call('tax.getNoticeList', { kind: kind, periodId: periodId, paymentDeadline: due }, function (d) { box.remove(); renderNotice(m, d); }, function (e) { box.textContent = e.message; });
+  }
+
+  function renderNotice(m, d) {
+    var ticked = {}, rowOf = {};
+    d.todo.concat(d.sent).forEach(function (r) { rowOf[r.filingId] = r; });
+    d.todo.forEach(function (r) { if (r.ticked) ticked[r.filingId] = 1; });
+
+    var tabs = el('div', { class: 'toolbar' });
+    NOTICE_TABS.forEach(function (t) {
+      var b = el('button', { class: 'btn small' + (t[0] === d.kind ? '' : ' secondary') }, t[1]);
+      b.onclick = function () { noticeDialog(t[0]); }; tabs.appendChild(b);
+    });
+    m.appendChild(tabs);
+    m.appendChild(el('div', { class: 'muted', style: 'margin-bottom:8px' }, d.period.label + '｜客戶還沒綁定 LINE 時走手動：按「複製訊息」→ 貼到客戶的 LINE 傳送 → 回來按「標記已手動傳送」才會記錄。'));
+    if (d.stale) m.appendChild(el('div', { class: 'alert' }, '唯讀模式：' + d.staleMessage));
+
+    var dueInput = null;
+    if (d.kind === 'BILL') {
+      var bar = el('div', { class: 'toolbar' });
+      bar.appendChild(el('span', {}, '本批付款期限：'));
+      dueInput = el('input', { type: 'date', style: 'width:auto' }); dueInput.value = d.paymentDeadline || '';
+      dueInput.onchange = function () { noticeDialog('BILL', dueInput.value || ''); };
+      bar.appendChild(dueInput);
+      bar.appendChild(el('span', { class: 'muted' }, d.defaultPaymentDeadline ? '（預設＝申報期限前一天，可改；改了訊息會跟著更新）' : '（已超過申報期限，沒有預設，請自行填寫）'));
+      m.appendChild(bar);
+      if (d.needPaymentDeadline) m.appendChild(el('div', { class: 'alert' }, '請先填付款期限，訊息才會完整。'));
+    }
+
+    var count = el('span', { class: 'muted' });
+    function updateCount() { var n = Object.keys(ticked).length; count.textContent = '已勾選 ' + n + ' 家'; mark.disabled = !n || !d.canWrite; }
+    var mark = el('button', { class: 'btn' }, '標記已手動傳送');
+
+    function rowLine(r, parent, isSent) {
+      var line = el('div', { style: 'border-top:1px solid var(--line);padding:6px 0' });
+      var top = el('div', { style: 'display:flex;align-items:center;gap:8px;flex-wrap:wrap' });
+      var cb = el('input', { type: 'checkbox' }); cb.checked = !!ticked[r.filingId]; cb.disabled = !d.canWrite;
+      cb.onchange = function () { if (cb.checked) ticked[r.filingId] = 1; else delete ticked[r.filingId]; updateCount(); };
+      var info = [];
+      if (r.amount != null) info.push('合計 ' + String(r.amount).replace(/\B(?=(\d{3})+(?!\d))/g, ','));
+      if (isSent && r.sentAt) info.push('已發 ' + r.sentAt.slice(5));
+      top.appendChild(cb); top.appendChild(el('strong', { style: 'min-width:90px' }, r.name)); top.appendChild(el('span', { class: 'muted' }, r.companyId));
+      if (info.length) top.appendChild(el('span', {}, info.join('　')));
+      if (r.amountChanged) top.appendChild(el('span', { class: 'badge warn' }, '金額已變動：原 ' + r.amountChanged.from + '→' + r.amountChanged.to));
+      if (r.anomaly) top.appendChild(el('span', { class: 'badge err' }, r.anomaly));
+      var sp = el('span', { style: 'flex:1' }); top.appendChild(sp);
+      var pv = el('button', { class: 'linkbtn' }, '預覽'), cp = el('button', { class: 'btn small secondary' }, '複製訊息'), tip = el('span', { class: 'muted', style: 'font-size:12px' });
+      var msg = el('div', { style: 'display:none;white-space:pre-wrap;background:#f6f8fb;border-radius:6px;padding:8px;margin:6px 0 0 26px;font-size:13px' }, r.message);
+      pv.onclick = function () { msg.style.display = msg.style.display === 'none' ? 'block' : 'none'; };
+      cp.onclick = function () {
+        copyText(r.message, function (ok) {
+          tip.textContent = ok ? '已複製，貼到客戶 LINE 傳送後再按下方「標記已手動傳送」' : '複製失敗，請按「預覽」手動選取文字';
+          if (ok && d.canWrite) { ticked[r.filingId] = 1; cb.checked = true; updateCount(); } // 複製後預選；沒按「標記」不會記錄
+        });
+      };
+      top.appendChild(pv); top.appendChild(cp); top.appendChild(tip);
+      line.appendChild(top); line.appendChild(msg); parent.appendChild(line);
+    }
+
+    var cardTodo = el('div', { class: 'card', style: 'margin-bottom:8px' });
+    cardTodo.appendChild(el('div', { class: 'card-title' }, d.label + '：該發的 ' + d.todo.length + ' 家'));
+    if (!d.todo.length) cardTodo.appendChild(el('div', { class: 'muted' }, '目前沒有該發的客戶。'));
+    d.todo.forEach(function (r) { rowLine(r, cardTodo, false); });
+    m.appendChild(cardTodo);
+    if (d.sent.length) {
+      var det = el('details', { class: 'card', style: 'margin-bottom:8px' });
+      det.appendChild(el('summary', { style: 'cursor:pointer;font-weight:600' }, '已發過（' + d.sent.length + ' 家）— 需要重發時再勾選'));
+      d.sent.forEach(function (r) { rowLine(r, det, true); });
+      m.appendChild(det);
+    }
+
+    var foot = el('div', { class: 'actions', style: 'align-items:center' });
+    var msgBox = el('span', { class: 'muted' });
+    var close = el('button', { class: 'btn secondary' }, '關閉'); close.onclick = function () { closeModal(); };
+    mark.onclick = function () {
+      var ids = Object.keys(ticked);
+      if (!ids.length) return;
+      if (d.kind === 'BILL' && !(dueInput && dueInput.value)) return alert('請先填寫本批付款期限。');
+      mark.disabled = true; msgBox.textContent = '處理中…';
+      call('tax.markNotified', {
+        kind: d.kind, paymentDeadline: dueInput ? dueInput.value : undefined,
+        items: ids.map(function (id) { return { filingId: id, updatedAt: rowOf[id].updatedAt }; })
+      }, function (res) {
+        var bad = res.results.filter(function (x) { return !x.ok; });
+        if (bad.length) alert(bad.length + ' 家沒有完成：' + bad[0].message + '\n（其餘已記錄；畫面會重新載入）');
+        if (taxData && taxData.period) loadTax(taxData.period.periodId);
+        noticeDialog(d.kind, dueInput ? dueInput.value : undefined);
+      }, function (e) { mark.disabled = false; msgBox.textContent = ''; alert(e.message); });
+    };
+    updateCount();
+    foot.appendChild(count); foot.appendChild(msgBox); foot.appendChild(close); foot.appendChild(mark);
+    m.appendChild(foot);
+  }
+  $('taxNoticeBtn').onclick = function () { if (!taxData || !taxData.period) return alert('請先開啟期別。'); noticeDialog('NOTICE1'); };
+
+  /* ---------- 通知設定（模組設定頁，僅超管） ---------- */
+  function renderNoticeSettings() {
+    var box = $('setNoticeBox'); box.innerHTML = '';
+    call('tax.getNoticeSettings', {}, function (r) {
+      var s = JSON.parse(JSON.stringify(r.settings)), c = el('div', { class: 'card' });
+      c.appendChild(el('div', { class: 'card-title' }, '通知設定（發送清單用）'));
+      if (!r.canWrite) c.appendChild(el('div', { class: 'alert' }, '系統同步異常，目前只能查看，不能儲存。'));
+      function num(label, key, hint) {
+        var i = el('input', { type: 'number', style: 'width:120px' }); i.value = s[key]; i.oninput = function () { s[key] = Number(i.value); };
+        field(c, label, i, hint);
+      }
+      num('第一次通知日（每期幾日發）', 'notice1Day', '首頁「該發第一次通知」到這天才會有數字。');
+      num('第二次通知日', 'notice2Day');
+      num('第一次通知的發票截止日（幾日前）', 'invoiceDay1', '訊息裡的 {截止日}。');
+      num('第二次通知的發票截止日', 'invoiceDay2');
+      num('催款天數（請款通知後幾天沒回報匯款才催）', 'dunDays');
+      var bn = el('textarea', { rows: '3', style: 'width:100%' }); bn.value = s.bankNote; bn.oninput = function () { s.bankNote = bn.value; };
+      field(c, '匯款帳號說明（放進請款通知；留空則不顯示）', bn);
+      var ph = r.placeholders.map(function (x) { return '{' + x + '}'; }).join(' ');
+      [['tplNotice1', '第一次通知訊息'], ['tplNotice2', '第二次通知訊息'], ['tplBill', '請款通知訊息'], ['tplDun', '催款訊息']].forEach(function (t) {
+        var ta = el('textarea', { rows: '6', style: 'width:100%' }); ta.value = s[t[0]]; ta.oninput = function () { s[t[0]] = ta.value; };
+        var reset = el('button', { class: 'linkbtn' }, '還原預設'); reset.onclick = function () { s[t[0]] = r.defaults[t[0]]; ta.value = s[t[0]]; };
+        field(c, t[1], ta, '可用欄位：' + ph); c.lastChild.appendChild(reset);
+      });
+      var save = el('button', { class: 'btn' }, '儲存通知設定'); save.disabled = !r.canWrite;
+      var out = el('span', { class: 'muted', style: 'margin-left:10px' });
+      save.onclick = function () {
+        save.disabled = true; out.textContent = '儲存中…';
+        call('tax.saveNoticeSettings', s, function () { save.disabled = false; out.textContent = '已儲存'; }, function (e) { save.disabled = false; out.textContent = e.message; });
+      };
+      c.appendChild(save); c.appendChild(out); box.appendChild(c);
+    }, function (e) { box.textContent = e.message; });
+  }
+
   /* ---------- 首頁區塊（P4）：期限列、異常、我的備忘、待辦卡片、整體進度、LINE 綁定進度 ---------- */
   var taxHomeData = null;
   function loadTaxHome(periodId) {
@@ -1786,6 +1933,7 @@
       card.appendChild(el('div', { style: 'font-weight:600' }, c.label));
       card.appendChild(el('div', { class: 'muted', style: 'font-size:12px' }, c.hint));
       card.onclick = function () {
+        if (CARD_NOTICE[c.key]) { if (taxData && taxData.period) noticeDialog(CARD_NOTICE[c.key]); return; } // 通知類卡片：直接開發送清單（沒有該發的也能開，可看已發過的）
         if (!c.count) return;
         taxAFocus = { label: c.label, ids: c.filingIds }; taxView = 'A';
         try { localStorage.setItem('taxView', 'A'); } catch (e) { /* 略過 */ }
@@ -2282,7 +2430,7 @@
   var setData = null;
   function loadTaxSettings() {
     $('setBox').textContent = '載入中…';
-    call('tax.getSettings', {}, function (d) { setData = JSON.parse(JSON.stringify(d)); renderTaxSettings(); }, function (e) { $('setBox').textContent = e.message; });
+    call('tax.getSettings', {}, function (d) { setData = JSON.parse(JSON.stringify(d)); renderTaxSettings(); renderNoticeSettings(); }, function (e) { $('setBox').textContent = e.message; });
   }
   function renderTaxSettings() {
     var d = setData, box = $('setBox'); box.innerHTML = '';
