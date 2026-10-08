@@ -1742,6 +1742,7 @@
         if (r.invoices && r.invoices.newCount > 0) info.push('又收到 ' + r.invoices.newCount + ' 份（最近 ' + r.invoices.newLastAt.slice(5, 10) + '）');
         if (r.reports && r.reports.INVOICES_DONE) info.push('✓客戶已確認傳完發票 ' + r.reports.INVOICES_DONE.slice(5));
         if (r.reports && r.reports.NO_INVOICE) info.push('客戶回覆本期沒有發票 ' + r.reports.NO_INVOICE.slice(5));
+        docLines(r).forEach(function (t) { info.push(t); });
         left.appendChild(el('div', { class: 'muted', style: 'font-size:12px' }, info.join('　·　')));
         line.appendChild(left);
         var next = STAGE_NEXT_STEP[code];
@@ -2205,6 +2206,7 @@
       if (r.invoices && r.invoices.newCount > 0) { var mb = el('button', { class: 'badge warn', style: 'margin-left:6px;border:0;cursor:pointer', title: '客戶又傳了檔案，按一下標示已看過' }, '又收到 ' + r.invoices.newCount + ' 份 ' + r.invoices.newLastAt.slice(5, 10)); mb.onclick = function () { markSeen(['F:' + r.filingId]); }; nm.appendChild(mb); }
       if (r.reports && r.reports.INVOICES_DONE) nm.appendChild(el('span', { class: 'badge ok', style: 'margin-left:6px', title: '客戶在 LINE 按了「我已傳完發票」' }, '✓客戶已確認傳完 ' + r.reports.INVOICES_DONE.slice(5)));
       if (r.reports && r.reports.NO_INVOICE) nm.appendChild(el('span', { class: 'badge warn', style: 'margin-left:6px', title: '客戶在 LINE 按了「本期沒有發票」' }, '客戶回覆本期沒有發票 ' + r.reports.NO_INVOICE.slice(5)));
+      if (r.docs && (r.docs.filed || r.docs.paid)) { var dl = docLines(r), dif = (r.docs.filed && r.docs.filed.differs) || (r.docs.paid && r.docs.paid.differs); nm.appendChild(el('span', { class: 'badge ' + (dif ? 'warn' : 'ok'), style: 'margin-left:6px', title: dl.join('\n') }, dif ? '📄日期不同' : '📄已讀取')); }
       if (r.note || r.taxNotes || r.bookkeepingNotes) { var ni = el('button', { class: 'linkbtn', style: 'text-decoration:none;margin-left:4px', title: [r.note, r.taxNotes, r.bookkeepingNotes].filter(Boolean).join('\n') }, 'ⓘ'); ni.onclick = function () { notesDialog(r); }; nm.appendChild(ni); }
       tr.appendChild(nm);
       var last = lastStep(r, d.steps);
@@ -2212,7 +2214,7 @@
       d.steps.forEach(function (code) {
         var td = el('td'), s = r.steps[code];
         var btn = el('button', { class: 'linkbtn', style: 'text-decoration:none' }, s && s.status === 'DONE' ? ('✔ ' + s.date.slice(5)) : '—');
-        if (s && s.status === 'DONE') { btn.title = (s.by || '') + (s.source === 'LINE' ? '（依客戶 LINE 傳來的資料自動標記）' : '') + '（點一下修改日期或清除）'; btn.style.color = 'var(--ok)'; } else btn.style.color = '#98a2b3';
+        if (s && s.status === 'DONE') { btn.title = (s.by || '') + (s.source === 'LINE' ? '（依客戶 LINE 傳來的資料自動標記）' : '') + (s.source === 'DOC' ? '（依申報書／繳稅回執自動填入）' : '') + '（點一下修改日期或清除）'; btn.style.color = 'var(--ok)'; } else btn.style.color = '#98a2b3';
         btn.disabled = !r.applicable || d.period.status !== 'OPEN' || !d.caps.canWrite;
         btn.onclick = function () {
           if (s && s.status === 'DONE') stepDialog(r, code, s);
@@ -2232,6 +2234,16 @@
     bar.classList.toggle('hidden', !taxData || !taxData.period || taxData.period.status !== 'OPEN' || !taxData.caps.canWrite || taxView !== 'B');
     $('taxSelCount').textContent = '已選 ' + n + ' 家';
     ['taxMarkBtn', 'taxClearBtn', 'taxNaBtn', 'taxExclBtn'].forEach(function (id) { $(id).disabled = !n || taxBusy; });
+  }
+
+  /** 申報書與繳稅回執的讀取摘要（P6）：每列一句；與目前登記的日期不同時加註 */
+  function docLines(r) {
+    var out = [], d = r.docs; if (!d) return out;
+    function md(x) { return x ? x.slice(5).replace('-', '/') : ''; }
+    function money(n) { return n === null || n === undefined ? '' : Number(n).toLocaleString('en-US'); }
+    if (d.filed) out.push('申報書：' + md(d.filed.date) + ' 申報' + (d.filed.taxDue !== null ? '，應實繳 ' + money(d.filed.taxDue) : '') + (d.filed.count > 1 ? '（第 ' + d.filed.count + ' 次申報）' : '') + (d.filed.differs ? '　⚠與目前登記的 ' + md(d.filed.registered) + ' 不同' : ''));
+    if (d.paid) out.push('繳稅回執：' + md(d.paid.date) + ' 繳款 ' + money(d.paid.amount) + (d.paid.differs ? '　⚠與目前登記的 ' + md(d.paid.registered) + ' 不同' : ''));
+    return out;
   }
 
   /** 標記步驟：畫面先更新，背景寫入；失敗或衝突時復原並重新載入 */
@@ -2324,6 +2336,12 @@
     var m = openModal(name + '　' + STEP_LABELS[code]);
     m.appendChild(el('div', { class: 'muted', style: 'margin-bottom:8px' }, '操作人：' + (s.by || '') + (s.source && s.source !== 'MANUAL' ? '（系統自動記錄）' : '')));
     var dt = el('input', { type: 'date' }); dt.value = s.date || todayStr(); field(m, '日期', dt);
+    var docPart = r.docs && (code === 'FILED' ? r.docs.filed : code === 'TAX_PAID' ? r.docs.paid : null);
+    if (docPart && docPart.date) {
+      var dbox = el('div', { class: docPart.differs ? 'alert' : 'muted', style: 'margin:6px 0' }, (code === 'FILED' ? '申報書' : '繳稅回執') + '上的日期是 ' + docPart.date + (docPart.differs ? '，與目前登記的不同（系統不會自動改人工填的日期）。' : '。'));
+      if (docPart.differs) { var useDoc = el('button', { class: 'linkbtn', style: 'margin-left:8px' }, '改成文件上的日期'); useDoc.onclick = function () { dt.value = docPart.date; }; dbox.appendChild(useDoc); }
+      m.appendChild(dbox);
+    }
     var bar = el('div', { class: 'actions' });
     var bs = el('button', { class: 'btn' }, '儲存日期'), bc = el('button', { class: 'btn danger' }, '清除標記'), bx = el('button', { class: 'btn secondary' }, '關閉');
     var ok = taxData.period.status === 'OPEN' && taxData.caps.canWrite; bs.disabled = !ok; bc.disabled = !ok;
