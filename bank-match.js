@@ -40,7 +40,8 @@
     };
   }
 
-  function feeOk(diff, tol, habit) { return (diff >= 1 && diff <= tol) || (habit != null && habit > 0 && diff === habit); }
+  /** 差額是否算匯費：1～一般容許（預設 30）；有慣例匯費的客戶，慣例比一般容許大時也算 */
+  function feeOk(diff, tol, habit) { return diff >= 1 && diff <= Math.max(tol, habit > 0 ? habit : 0); }
 
   /**
    * @param {Array} txns   { id, amount, date, payerAccount, payerName, payerTag }  客戶收款（正數）
@@ -88,7 +89,14 @@
       if (m.length > 1) { done(t, 'PROPOSED', 'A', p.known, [{ billId: m[0].billId, companyId: m[0].companyId, allocated: t.amount, fee: 0 }]); return; }
       // B 匯費容許（差額 1～容許，或等於該公司慣扣匯費）
       m = cb.filter(function (b) { return feeOk(b.amount - t.amount, s.fee, R.feeHabit[b.companyId]); });
-      if (m.length === 1) { var bb = m[0]; done(t, decide(p.known, single), 'B', p.known, [{ billId: bb.billId, companyId: bb.companyId, allocated: t.amount, fee: bb.amount - t.amount }]); return; }
+      if (m.length === 1) {
+        var bb = m[0], gap = bb.amount - t.amount, hab = R.feeHabit[bb.companyId];
+        // 這家客戶有「慣例匯費」（例如每次扣 10 元）：差額在慣例內自動確認；超過慣例（即使在一般容許內）改為建議並標示，提醒業主確認是不是少匯
+        var over = hab > 0 && gap > hab;
+        done(t, over ? 'PROPOSED' : decide(p.known, single), 'B', p.known, [{ billId: bb.billId, companyId: bb.companyId, allocated: t.amount, fee: gap }]);
+        if (over) results[t.id].overHabit = hab;
+        return;
+      }
       // C 分次加總：同付款人、時間窗內，2～splitMax 筆合計等於某張請款單（容許匯費上限 × 筆數）
       if (cids.length && cb.length) {
         var peers = (byPayer[payerKey(t)] || []).filter(function (x) { return x.id !== t.id && !results[x.id] && Math.abs(x.date - t.date) <= s.splitDays * DAY; })

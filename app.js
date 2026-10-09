@@ -2055,13 +2055,27 @@
   function dayDiff(a, b) { return Math.round((Date.parse(b + 'T00:00:00Z') - Date.parse(a + 'T00:00:00Z')) / 86400000); }
   function remaining(r) { return r.total - r.received - r.fee; }
 
+  /** 差額＝應收 − 實收（匯費也算在內）＋旁邊的性質標籤；還沒收任何款的不顯示（避免整欄都是數字） */
+  function diffInfo(r) {
+    if (r.received + r.fee <= 0) return null;
+    var diff = r.total - r.received;
+    if (diff === 0) return null;
+    var tag = '', cls = '', title = '';
+    if (r.status === 'RECONCILED' && r.fee === diff) { tag = '匯費免收'; cls = 'ok'; title = '待收 ' + money(r.total) + ' − 入帳 ' + money(r.received) + ' ＝ 匯費 ' + diff + ' 元（在匯費容許內，視為匯費免收）'; }
+    else if (r.status === 'RESOLVED') { tag = DIFF_LABEL[r.diffResolution] || '已處理'; cls = 'ok'; title = r.diffNote || ''; }
+    else if (r.diffResolution === 'CUSTOMER_TOPUP') { tag = '等客戶補匯'; cls = 'warn'; title = r.diffNote || ''; }
+    else if (r.status === 'PARTIAL') { tag = '部分收款'; cls = 'warn'; if (r.fee) title = '其中匯費免收 ' + r.fee + ' 元'; }
+    else if (r.status === 'DIFF') { tag = diff < 0 ? '多收' : '有差額'; cls = 'err'; }
+    return { diff: diff, tag: tag, cls: cls, title: title };
+  }
+
   /** 一列的狀態文字與標籤（逾期、客戶回報超過 N 天仍未對上） */
   function ledgerStatus(r, d) {
     var s = { text: '', cls: '', extra: [] }, rem = remaining(r);
     if (r.status === 'RECONCILED') { s.text = '已對帳'; s.cls = 'ok'; }
-    else if (r.status === 'RESOLVED') { s.text = '已處理（' + (DIFF_LABEL[r.diffResolution] || r.diffResolution) + '）'; s.cls = 'ok'; }
-    else if (r.status === 'PARTIAL') { s.text = '部分收款（還差 ' + money(rem) + '）' + (r.diffResolution === 'CUSTOMER_TOPUP' ? '・等客戶補匯' : ''); s.cls = 'warn'; }
-    else if (r.status === 'DIFF') { s.text = rem < 0 ? '多收 ' + money(-rem) : '有差額 ' + money(rem); s.cls = 'err'; }
+    else if (r.status === 'RESOLVED') { s.text = '已處理'; s.cls = 'ok'; }
+    else if (r.status === 'PARTIAL') { s.text = '部分收款'; s.cls = 'warn'; }
+    else if (r.status === 'DIFF') { s.text = rem < 0 ? '多收' : '有差額'; s.cls = 'err'; }
     else if (r.status === 'REPORTED') { s.text = '客戶已回報'; s.cls = 'warn'; }
     else { s.text = '未收'; s.cls = 'off'; }
     var open = r.status === 'UNPAID' || r.status === 'REPORTED' || r.status === 'PARTIAL';
@@ -2074,7 +2088,7 @@
     if (f === 'unpaid') return st === 'UNPAID';
     if (f === 'reported') return st === 'REPORTED';
     if (f === 'partial') return st === 'PARTIAL';
-    if (f === 'diff') return st === 'DIFF' || (st === 'PARTIAL' && !!r.diffResolution);
+    if (f === 'diff') return (st === 'PARTIAL' || st === 'DIFF') && !r.diffResolution; // 待處理的差額（不含匯費免收與已處理）
     if (f === 'overdue') return open && !!r.dueDate && d.today > r.dueDate;
     if (f === 'done') return st === 'RECONCILED' || st === 'RESOLVED';
     return true;
@@ -2096,13 +2110,13 @@
     d.periods.forEach(function (p) { per.appendChild(el('option', { value: p }, '帳期 ' + p)); });
     per.value = d.period; per.onchange = function () { lg.open = {}; loadLedger(per.value); };
     var fil = el('select', { style: 'width:auto' });
-    [['all', '全部'], ['unpaid', '未匯款'], ['reported', '客戶已回報未對帳'], ['partial', '部分收款'], ['diff', '有差額'], ['overdue', '逾期'], ['done', '已對帳']].forEach(function (o) { fil.appendChild(el('option', { value: o[0] }, o[1])); });
+    [['all', '全部'], ['unpaid', '未匯款'], ['reported', '客戶已回報未對帳'], ['partial', '部分收款'], ['diff', '有待處理的差額'], ['overdue', '逾期'], ['done', '已對帳']].forEach(function (o) { fil.appendChild(el('option', { value: o[0] }, o[1])); });
     fil.value = lg.filter; fil.onchange = function () { lg.filter = fil.value; paint(); };
     var q = el('input', { type: 'text', placeholder: '搜尋統編、簡稱' }); q.value = lg.q; q.oninput = function () { lg.q = q.value; paint(); };
     var rf = el('button', { class: 'btn small secondary' }, '重新整理'); rf.onclick = function () { loadLedger(d.period); };
     bar.appendChild(per); bar.appendChild(fil); bar.appendChild(q); bar.appendChild(rf); box.appendChild(bar);
     if (!d.canWrite) box.appendChild(el('div', { class: 'alert' }, '唯讀模式：系統同步異常，暫時無法登記或修改。'));
-    box.appendChild(el('div', { class: 'muted', style: 'margin-bottom:6px' }, '一列是一張請款單（同一家公司同一帳期有營業稅單與暫繳單時各一列）。點「展開」可看已確認的收款、登記現金、處理差額。金額單位：元。'));
+    box.appendChild(el('div', { class: 'muted', style: 'margin-bottom:6px' }, '一列是一張請款單（同一家公司同一帳期有營業稅單與暫繳單時各一列）。差額＝應收 − 實收（匯費也算在內），**點差額的數字**可以處理；點「展開」可看已確認的收款、登記現金、合併其他客戶。金額單位：元。'));
     var tbl = el('div'); box.appendChild(tbl);
     function paint() {
       tbl.innerHTML = '';
@@ -2110,33 +2124,65 @@
       var list = d.rows.filter(function (r) { return ledgerMatchFilter(r, lg.filter, d) && (!key || (r.companyId + ' ' + r.name).toLowerCase().indexOf(key) >= 0); });
       if (!list.length) { tbl.appendChild(el('div', { class: 'muted' }, d.rows.length ? '沒有符合的請款單。' : '這個帳期還沒有請款單。')); return; }
       var t = el('table', { class: 'ledger' }), h = el('tr');
-      ['統編', '簡稱', '類別', '記帳費', '稅金', '其他', '應收', '付款期限', '客戶回報', '實收', '入帳日', '匯費', '差額', '狀態', ''].forEach(function (x, i) { h.appendChild(el('th', [3, 4, 5, 6, 9, 11, 12].indexOf(i) >= 0 ? { class: 'num' } : {}, x)); }); t.appendChild(h);
-      var tot = { total: 0, received: 0, fee: 0, diff: 0 };
+      ['統編', '簡稱', '類別', '記帳費', '稅金', '其他', '應收', '付款期限', '客戶回報', '實收', '入帳日', '差額', '狀態', ''].forEach(function (x, i) { h.appendChild(el('th', [3, 4, 5, 6, 9, 11].indexOf(i) >= 0 ? { class: 'num' } : {}, x)); }); t.appendChild(h);
+      var tot = { total: 0, received: 0, diff: 0 };
       list.forEach(function (r) {
-        var st = ledgerStatus(r, d), tr = el('tr');
-        tot.total += r.total; tot.received += r.received; tot.fee += r.fee; tot.diff += remaining(r);
+        var st = ledgerStatus(r, d), info = diffInfo(r), tr = el('tr');
+        tot.total += r.total; tot.received += r.received; if (info) tot.diff += info.diff;
         [r.companyId, r.name, KIND_LABEL[r.kind] || r.kind, money(r.bookkeeping), money(r.tax), money(r.other), money(r.total), r.dueDate ? r.dueDate.slice(5) : '', r.reportedAt ? r.reportedAt.slice(5) : '', money(r.received), r.receivedAt ? r.receivedAt.slice(5) : ''].forEach(function (x, i) {
           tr.appendChild(el('td', i >= 3 && i <= 6 || i === 9 ? { class: 'num' } : {}, x));
         });
-        var feeTd = el('td', { class: 'num' }, r.fee ? String(r.fee) : ''); if (r.fee) feeTd.title = '匯費免收 ' + r.fee + ' 元（待收 − 入帳）';
-        tr.appendChild(feeTd);
-        tr.appendChild(el('td', { class: 'num' }, remaining(r) ? money(remaining(r)) : ''));
+        var dtd = el('td', { class: 'num' });
+        if (info) {
+          var db = el('button', { class: 'linkbtn' }, (info.diff < 0 ? '−' : '') + money(Math.abs(info.diff))); db.title = '點一下處理或查看這個差額'; db.onclick = function () { diffDialog(r, d); };
+          dtd.appendChild(db);
+          if (info.tag) { var tg = badge(info.tag, info.cls); if (info.title) tg.title = info.title; tg.style.marginLeft = '6px'; dtd.appendChild(tg); }
+        }
+        tr.appendChild(dtd);
         var sd = el('td'); sd.appendChild(badge(st.text, st.cls)); st.extra.forEach(function (x) { sd.appendChild(badge(x[0], x[1])); }); tr.appendChild(sd);
         var op = el('td'), ex = el('button', { class: 'linkbtn' }, lg.open[r.billId] ? '收合' : '展開');
         ex.onclick = function () { lg.open[r.billId] = !lg.open[r.billId]; paint(); };
         op.appendChild(ex); tr.appendChild(op); t.appendChild(tr);
         if (lg.open[r.billId]) {
-          var dr = el('tr'), dt = el('td', { colspan: '15', style: 'background:#f6f8fb' });
+          var dr = el('tr'), dt = el('td', { colspan: '14', style: 'background:#f6f8fb' });
           dt.appendChild(ledgerDetail(r, d)); dr.appendChild(dt); t.appendChild(dr);
         }
       });
       var fr = el('tr', { style: 'font-weight:600' });
       fr.appendChild(el('td', { colspan: '6' }, '合計（' + list.length + ' 張）'));
-      [tot.total, '', '', tot.received, '', tot.fee, tot.diff].forEach(function (x, i) { fr.appendChild(el('td', { class: 'num' }, x === '' ? '' : money(x))); });
-      fr.appendChild(el('td', { colspan: '2' }, '')); t.appendChild(fr);
+      fr.appendChild(el('td', { class: 'num' }, money(tot.total))); fr.appendChild(el('td', { colspan: '2' }, ''));
+      fr.appendChild(el('td', { class: 'num' }, money(tot.received))); fr.appendChild(el('td', {}, ''));
+      fr.appendChild(el('td', { class: 'num' }, tot.diff ? (tot.diff < 0 ? '−' : '') + money(Math.abs(tot.diff)) : '')); fr.appendChild(el('td', { colspan: '2' }, ''));
+      t.appendChild(fr);
       var sc = el('div', { class: 'scrollx' }); sc.appendChild(t); tbl.appendChild(sc);
     }
     paint();
+  }
+
+  /** 點差額數字：匯費免收（自動處理）→ 看明細；已處理 → 看處理結果並可撤銷或重選；其餘 → 處理視窗 */
+  function diffDialog(r, d) {
+    var info = diffInfo(r), rem = remaining(r);
+    if (r.diffResolution && r.status !== 'RECONCILED') {
+      var m = openModal('差額已處理');
+      m.appendChild(el('div', { class: 'muted' }, r.companyId + ' ' + r.name + '　應收 ' + money(r.total) + '，已收 ' + money(r.received + r.fee)));
+      m.appendChild(el('p', {}, '處理方式：' + (DIFF_LABEL[r.diffResolution] || r.diffResolution)));
+      m.appendChild(el('p', {}, '備註：' + (r.diffNote || '（無）') + (r.resolvedBy ? '（' + r.resolvedBy + ' ' + (r.resolvedAt || '').slice(0, 10) + '）' : '')));
+      var acts = el('div', { class: 'actions' }), close = el('button', { class: 'btn secondary' }, '關閉'); close.onclick = closeModal;
+      var re = el('button', { class: 'btn secondary' }, '重新選擇處理方式'); re.disabled = !d.canWrite || rem === 0; re.onclick = function () { closeModal(); resolveDialog(r, d); };
+      var ro = el('button', { class: 'btn' }, '撤銷處理'); ro.disabled = !d.canWrite;
+      ro.onclick = function () { if (!confirm('撤銷後，這張請款單回到依實收金額計算的狀態。確定？')) return; ro.disabled = true; call('bank.resolveDiff', { billId: r.billId, resolution: 'REOPEN' }, function () { closeModal(); loadLedger(d.period); }, function (e) { ro.disabled = false; alert(e.message); }); };
+      acts.appendChild(close); acts.appendChild(re); acts.appendChild(ro); m.appendChild(acts);
+      return;
+    }
+    if (r.status === 'RECONCILED') {
+      var m2 = openModal('差額明細');
+      m2.appendChild(el('div', { class: 'muted' }, r.companyId + ' ' + r.name + '　' + (KIND_LABEL[r.kind] || '') + '請款單'));
+      m2.appendChild(el('p', {}, '應收 ' + money(r.total) + '，實收 ' + money(r.received) + '，差 ' + money(info ? info.diff : 0) + ' 元。'));
+      m2.appendChild(el('p', {}, '這個差額在匯費容許內，系統已視為「匯費免收」，這張請款單已對帳完成，不需要處理。'));
+      var a2 = el('div', { class: 'actions' }), c2 = el('button', { class: 'btn secondary' }, '關閉'); c2.onclick = closeModal; a2.appendChild(c2); m2.appendChild(a2);
+      return;
+    }
+    resolveDialog(r, d);
   }
 
   function ledgerDetail(r, d) {
@@ -2161,14 +2207,11 @@
       });
       box.appendChild(t);
     }
-    if (r.diffNote) box.appendChild(el('div', { class: 'muted', style: 'margin-top:4px' }, '差額處理備註：' + r.diffNote + (r.resolvedBy ? '（' + r.resolvedBy + ' ' + (r.resolvedAt || '').slice(0, 10) + '）' : '')));
     var acts = el('div', { style: 'margin-top:8px' }), rem = remaining(r);
     var closed = r.status === 'RECONCILED' || r.status === 'RESOLVED';
     var reg = el('button', { class: 'btn small' }, '登記收款（現金／其他）'); reg.disabled = !d.canWrite || closed; reg.style.marginRight = '10px';
     reg.onclick = function () { registerDialog(r, d); }; acts.appendChild(reg);
     var mg = el('button', { class: 'btn small secondary' }, '合併其他客戶'); mg.disabled = !d.canWrite; mg.style.marginRight = '10px'; mg.title = '一筆款同時付了好幾家客戶時，在這裡把款項分給／併入其他客戶'; mg.onclick = function () { mergeDialog(r, d); }; acts.appendChild(mg);
-    if (rem !== 0 && !closed) { var rs = el('button', { class: 'btn small secondary' }, '處理差額'); rs.disabled = !d.canWrite; rs.onclick = function () { resolveDialog(r, d); }; acts.appendChild(rs); }
-    if (r.diffResolution) { var ro = el('button', { class: 'btn small secondary' }, '撤銷差額處理'); ro.disabled = !d.canWrite; ro.style.marginLeft = '10px'; ro.onclick = function () { if (!confirm('撤銷後，請款單回到依實收金額計算的狀態。確定？')) return; call('bank.resolveDiff', { billId: r.billId, resolution: 'REOPEN' }, function () { loadLedger(d.period); }); }; acts.appendChild(ro); }
     box.appendChild(acts);
     return box;
   }
@@ -2287,9 +2330,9 @@
 
   function showBankPage() {
     var hasBank = me && (me.role === 'SUPER_ADMIN' || (me.features || []).indexOf('BANK_RECONCILIATION') >= 0);
-    if (!hasBank) bankTab = 'ledger'; // 只有稅務申報權限者只看得到收款對帳表
+    if (!hasBank) bankTab = 'ledger'; // 只有稅務申報權限者只看得到客戶帳款表
     var tabs = $('bankTabs'); tabs.innerHTML = '';
-    (hasBank ? [['stmt', '銀行明細'], ['ledger', '收款對帳表'], ['alias', '匯款來源']] : [['ledger', '收款對帳表']]).forEach(function (t) {
+    (hasBank ? [['ledger', '客戶帳款表'], ['stmt', '匯入銀行明細'], ['alias', '客戶資料']] : [['ledger', '客戶帳款表']]).forEach(function (t) {
       var b = el('button', { class: 'btn small' + (bankTab === t[0] ? '' : ' secondary') }, t[1]);
       b.onclick = function () { bankTab = t[0]; showBankPage(); }; tabs.appendChild(b);
     });
@@ -2298,7 +2341,7 @@
     $('bankAliasView').classList.toggle('hidden', bankTab !== 'alias');
     if (bankTab === 'alias') loadBank(); else if (bankTab === 'ledger') loadLedger(); else if (bs && bs.rows) reloadCtx(); else renderStmtStart();
   }
-  var bankTab = 'stmt';
+  var bankTab = 'ledger';
 
   function renderStmtStart() {
     var box = $('bankStmtView');
@@ -2389,12 +2432,12 @@
     head.appendChild(el('strong', {}, bs.fileName));
     var again = el('button', { class: 'btn small secondary' }, '重新選檔（捨棄目前畫面）'); again.onclick = function () { if (!confirm('目前畫面上尚未送出的勾選與指定都會捨棄。確定重新選檔？')) return; bs = null; renderStmtStart(); };
     head.appendChild(again);
-    var refresh = el('button', { class: 'btn small secondary' }, '重新取得請款單與匯款來源');
-    refresh.title = '剛匯入請款單、剛加入匯款來源、或別人剛送出對帳時按這個（不用重新選檔）';
+    var refresh = el('button', { class: 'btn small secondary' }, '重新取得請款單與客戶資料');
+    refresh.title = '剛匯入請款單、剛加入客戶資料、或別人剛送出對帳時按這個（不用重新選檔）';
     refresh.onclick = function () { refresh.disabled = true; reloadCtx(); };
     head.appendChild(refresh);
     var at = bs.ctxAt ? bs.ctxAt.getHours() + ':' + ('0' + bs.ctxAt.getMinutes()).slice(-2) : '';
-    head.appendChild(el('span', { class: 'muted' }, '比對資料取得時間 ' + at + '（待收請款單 ' + bs.ctx.bills.length + ' 張、匯款來源 ' + bs.ctx.aliases.length + ' 筆）'));
+    head.appendChild(el('span', { class: 'muted' }, '比對資料取得時間 ' + at + '（待收請款單 ' + bs.ctx.bills.length + ' 張、客戶資料 ' + bs.ctx.aliases.length + ' 筆）'));
     box.appendChild(head);
     var dateBar = el('div', { class: 'toolbar' });
     dateBar.appendChild(document.createTextNode('只處理這個日期之後的交易（含當天）：'));
@@ -2450,6 +2493,7 @@
       r.match.allocations.forEach(function (a) {
         var line = el('div'); line.appendChild(document.createTextNode(companyName(a.companyId) + '　' + billLabel(a.billId) + '　入帳 ' + money(a.allocated)));
         if (a.fee > 0) { var bd = badge('匯費 ' + a.fee, 'warn'); var b = bs.ctx.bills.filter(function (x) { return x.billId === a.billId; })[0]; bd.title = '待收 ' + money(b ? b.remaining : a.allocated + a.fee) + ' − 入帳 ' + money(a.allocated) + ' = 匯費 ' + a.fee + ' 元（視為匯費免收）'; line.appendChild(bd); }
+        if (r.match.overHabit) line.appendChild(badge('超過平常匯費 ' + r.match.overHabit + ' 元，請確認', 'err'));
         rs.appendChild(line);
       });
       rs.appendChild(el('div', { class: 'muted' }, RULE_LABEL[r.match.rule] || r.match.rule));
@@ -2521,7 +2565,7 @@
     m.appendChild(more); m.appendChild(sumLine);
     var learnCb = el('input', { type: 'checkbox' }); learnCb.checked = r.learn !== false;
     var learnLab = el('label', { style: 'display:flex;gap:6px;align-items:center;margin-top:8px' }); learnLab.appendChild(learnCb);
-    learnLab.appendChild(el('span', {}, '把這個匯款來源加入對照（' + [r.p.payerTag && '標註 ' + r.p.payerTag, r.p.payerAccount && '帳號 ' + r.p.payerAccount, r.p.payerName && '戶名 ' + r.p.payerName].filter(Boolean).join('、') + '），下次自動認得；選了多家公司就對每一家都加'));
+    learnLab.appendChild(el('span', {}, '把這個客戶資料加入對照（' + [r.p.payerTag && '標註 ' + r.p.payerTag, r.p.payerAccount && '帳號 ' + r.p.payerAccount, r.p.payerName && '戶名 ' + r.p.payerName].filter(Boolean).join('、') + '），下次自動認得；選了多家公司就對每一家都加'));
     m.appendChild(learnLab); m.appendChild(info);
     var acts = el('div', { class: 'actions' }), cancel = el('button', { class: 'btn secondary' }, '取消'), ok = el('button', { class: 'btn' }, '確定');
     cancel.onclick = closeModal;
@@ -2537,7 +2581,7 @@
     acts.appendChild(cancel); acts.appendChild(ok); m.appendChild(acts);
   }
 
-  /** 新來源建議（M2 6.2 入口一）：這份明細裡帳號、戶名、標註還不在匯款來源裡的，列出來讓業主一次加入 */
+  /** 新來源建議（M2 6.2 入口一）：這份明細裡帳號、戶名、標註還不在客戶資料裡的，列出來讓業主一次加入 */
   function renderSuggestions(box) {
     var have = {}; bs.ctx.aliases.forEach(function (a) { have[a.type + '|' + a.value] = 1; });
     var combos = {}, list = [];
@@ -2551,7 +2595,7 @@
     });
     if (!list.length) return;
     var panel = el('details', { class: 'card', style: 'margin-bottom:8px' });
-    panel.appendChild(el('summary', { style: 'cursor:pointer;font-weight:600' }, '新來源建議（' + list.length + ' 組尚未記在匯款來源裡）'));
+    panel.appendChild(el('summary', { style: 'cursor:pointer;font-weight:600' }, '新來源建議（' + list.length + ' 組尚未記在客戶資料裡）'));
     var body = el('div'); panel.appendChild(body); box.appendChild(panel);
     var loaded = false;
     panel.addEventListener('toggle', function () {
@@ -2587,13 +2631,13 @@
       go1.disabled = true;
       call('bank.addAliases', { items: items }, function (r) {
         items.forEach(function (it) { bs.ctx.aliases.push({ companyId: it.companyId, type: 'TAG', value: it.tag, status: 'ACTIVE' }); it.accounts.forEach(function (a) { bs.ctx.aliases.push({ companyId: it.companyId, type: 'ACCOUNT', value: a, status: 'ACTIVE' }); }); it.names.forEach(function (a) { bs.ctx.aliases.push({ companyId: it.companyId, type: 'NAME', value: a, status: 'ACTIVE' }); }); });
-        alert('已加入 ' + r.added + ' 筆匯款來源。'); buildRows(); renderStmt();
+        alert('已加入 ' + r.added + ' 筆客戶資料。'); buildRows(); renderStmt();
       }, function (e) { go1.disabled = false; msg.textContent = e.message; });
     };
     body.appendChild(msg); body.appendChild(go1);
   }
 
-  /** 送出：勾選的對帳結果＋略過／非客戶標記＋匯款來源學習，每批最多 30 筆 */
+  /** 送出：勾選的對帳結果＋略過／非客戶標記＋客戶資料學習，每批最多 30 筆 */
   function submitRows(btn, msgBox) {
     var rows = bs.rows, items = [], marks = [], learnBy = {};
     rows.filter(sendable).forEach(function (r) {
@@ -2667,7 +2711,7 @@
     return det;
   }
 
-  /* ---------- 收款對帳（M2）：匯款來源。銀行交易明細不存雲端：只在瀏覽器記憶體讀取，不上傳 ---------- */
+  /* ---------- 收款對帳（M2）：客戶資料。銀行交易明細不存雲端：只在瀏覽器記憶體讀取，不上傳 ---------- */
   var bankData = null;
   var XLSX_URL = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
   var xlsxPromise = null;
@@ -2689,86 +2733,85 @@
       return window.YcBank.readStatement(r[1].utils.sheet_to_json(ws, { header: 1, raw: true, defval: '' }));
     });
   }
-  var ALIAS_TYPE_LABEL = { ACCOUNT: '轉出帳號', NAME: '匯款戶名', TAG: '網銀標註', FEE_HABIT: '慣扣匯費' };
-  var ALIAS_SOURCE_LABEL = { HISTORY_IMPORT: '歷史匯入', CONFIRMED: '人工確認', MANUAL: '手動新增' };
+  var ALIAS_TYPE_LABEL = { TAG: '網銀標註', NAME: '匯款戶名', ACCOUNT: '轉出帳號', FEE_HABIT: '慣例匯費' };
+  var ALIAS_REP_ORDER = { TAG: 0, NAME: 1, ACCOUNT: 2, FEE_HABIT: 3 };   // 一家公司的「第一筆」代表：標註 → 戶名 → 帳號（慣例匯費不當代表）
+  var aliasOpen = {}, aliasQ = '';
 
   function loadBank() {
     var box = $('bankBox'); box.textContent = '載入中…';
     call('bank.listAliases', {}, function (d) { bankData = d; renderBank(); }, function (e) { box.textContent = e.message; });
   }
 
+  /** 客戶資料（原客戶資料）：一家公司一列，第一筆當代表，可展開看全部；欄位只有 統編、公司名稱、類型、內容 */
   function renderBank() {
     var d = bankData, box = $('bankBox'); box.innerHTML = '';
     var bar = el('div', { class: 'toolbar' });
-    var search = el('input', { type: 'text', placeholder: '搜尋帳號、戶名、標註、公司' });
-    var stSel = el('select', { style: 'width:auto' });
-    [['ACTIVE', '使用中'], ['DISABLED', '已停用'], ['', '全部']].forEach(function (o) { stSel.appendChild(el('option', { value: o[0] }, o[1])); });
-    var typeSel = el('select', { style: 'width:auto' });
-    typeSel.appendChild(el('option', { value: '' }, '全部類型'));
-    Object.keys(ALIAS_TYPE_LABEL).forEach(function (k) { typeSel.appendChild(el('option', { value: k }, ALIAS_TYPE_LABEL[k])); });
-    var add = el('button', { class: 'btn small' }, '新增');
-    add.disabled = !d.canWrite; add.onclick = function () { aliasDialog(null); };
-    bar.appendChild(search); bar.appendChild(stSel); bar.appendChild(typeSel); bar.appendChild(add);
+    var search = el('input', { type: 'text', placeholder: '搜尋統編、公司名稱、標註、戶名、帳號' }); search.value = aliasQ;
+    var add = el('button', { class: 'btn small' }, '新增客戶資料'); add.disabled = !d.canWrite; add.onclick = addCustomerDialog;
+    bar.appendChild(search); bar.appendChild(add);
     if (d.isSuper) {
-      var boot = el('button', { class: 'btn small secondary' }, '建立匯款來源對照（上線前一次性）');
+      var boot = el('button', { class: 'btn small secondary' }, '從銀行明細建立客戶資料'); boot.title = '上線前一次性：用歷史明細裡你打的網銀標註，一次建立客戶資料';
       boot.disabled = !d.canWrite; boot.onclick = bootstrapDialog; bar.appendChild(boot);
-      var clean = el('button', { class: 'btn small secondary' }, '清理序號型帳號');
-      clean.title = '舊版把銀行交易序號（10 碼數字）誤當成轉出帳號存進來；這裡一次清掉';
-      clean.disabled = !d.canWrite;
-      clean.onclick = function () {
-        call('bank.cleanupSerialAliases', {}, function (r) {
-          if (!r.count) { alert('沒有需要清理的序號型帳號。'); return; }
-          if (!confirm('找到 ' + r.count + ' 筆「10 碼數字」的轉出帳號（歷史匯入或對帳學習建立、從未使用）。\n這是銀行的交易序號，不是帳號，留著沒有用。\n\n範例：' + r.samples.map(function (s) { return s.companyId + ' ' + s.value; }).join('、') + '\n\n全部刪除？')) return;
-          call('bank.cleanupSerialAliases', { apply: true }, function (x) { alert('已刪除 ' + x.deleted + ' 筆。'); loadBank(); });
-        });
-      };
-      bar.appendChild(clean);
     }
+    var ex = el('button', { class: 'btn small secondary' }, '全部展開'), co = el('button', { class: 'btn small secondary' }, '全部收合');
+    bar.appendChild(ex); bar.appendChild(co);
     box.appendChild(bar);
-    box.appendChild(el('div', { class: 'muted', style: 'margin-bottom:6px' }, '匯款來源＝「哪個帳號、戶名、標註屬於哪家公司」，對帳時用來自動認出付款人。同一個帳號可以對到多家公司（替多家公司付款）。'));
+    box.appendChild(el('div', { class: 'muted', style: 'margin-bottom:6px' }, '客戶資料＝「哪個網銀標註、戶名、轉出帳號屬於哪家公司」，對帳時用來自動認出付款人。同一個帳號可以對到多家公司（替多家公司付款）。每家公司以第一筆（標註優先）當代表，按右邊「共 N 筆」展開。'));
     if (!d.canWrite) box.appendChild(el('div', { class: 'alert' }, '唯讀模式：系統同步異常，暫時無法新增或修改。'));
     var tbl = el('div'); box.appendChild(tbl);
+    // 依公司分組
+    var by = {}, order = [];
+    d.aliases.forEach(function (a) { if (!by[a.companyId]) { by[a.companyId] = { companyId: a.companyId, name: a.companyName, items: [] }; order.push(a.companyId); } by[a.companyId].items.push(a); });
+    order.sort();
+    order.forEach(function (id) { by[id].items.sort(function (x, y) { return (ALIAS_REP_ORDER[x.type] - ALIAS_REP_ORDER[y.type]) || x.value.localeCompare(y.value); }); });
+    function valueText(a) { return a.type === 'FEE_HABIT' ? a.value + ' 元（對帳時這家平常被扣的匯費）' : a.value; }
+    function actionsFor(a, td) {
+      var ed = el('button', { class: 'linkbtn' }, '修改'); ed.disabled = !d.canWrite; ed.onclick = function () { aliasDialog(a); }; ed.style.marginRight = '14px';
+      var del = el('button', { class: 'linkbtn', style: 'color:#b42318' }, '刪除'); del.disabled = !d.canWrite;
+      del.onclick = function () {
+        if (!confirm('刪除「' + ALIAS_TYPE_LABEL[a.type] + '：' + a.value + '」？\n刪除後無法復原（對帳時就不會再用它認付款人，已確認的對帳結果不受影響）。')) return;
+        call('bank.deleteAlias', { aliasId: a.aliasId }, loadBank);
+      };
+      td.appendChild(ed); td.appendChild(del);
+    }
     function paint() {
       tbl.innerHTML = '';
-      var q = search.value.trim().toLowerCase();
-      var list = d.aliases.filter(function (a) {
-        if (stSel.value && a.status !== stSel.value) return false;
-        if (typeSel.value && a.type !== typeSel.value) return false;
-        return !q || (a.value + ' ' + a.companyName + ' ' + a.companyId).toLowerCase().indexOf(q) >= 0;
+      var q = aliasQ.trim().toLowerCase();
+      var list = order.map(function (id) { return by[id]; }).filter(function (g) {
+        return !q || (g.companyId + ' ' + g.name + ' ' + g.items.map(function (a) { return a.value; }).join(' ')).toLowerCase().indexOf(q) >= 0;
       });
-      if (!list.length) { tbl.appendChild(el('div', { class: 'muted' }, d.aliases.length ? '沒有符合的資料。' : '還沒有任何匯款來源。上線前可由超級管理員按「建立匯款來源對照」用歷史明細一次建立；之後對帳時會自動學習。')); return; }
+      if (!list.length) { tbl.appendChild(el('div', { class: 'muted' }, d.aliases.length ? '沒有符合的資料。' : '還沒有任何客戶資料。上線前可由超級管理員按「從銀行明細建立客戶資料」一次建立；之後對帳時會自動學習。')); return; }
       var t = el('table', { class: 'auto' }), h = el('tr');
-      ['公司', '類型', '內容', '來源', '使用次數', '最後使用', '狀態', '操作'].forEach(function (x) { h.appendChild(el('th', {}, x)); }); t.appendChild(h);
-      list.forEach(function (a) {
-        var tr = el('tr');
-        tr.appendChild(el('td', {}, a.companyId + ' ' + a.companyName));
-        tr.appendChild(el('td', {}, ALIAS_TYPE_LABEL[a.type] || a.type));
-        var c = el('td', {}, a.type === 'FEE_HABIT' ? a.value + ' 元' : a.value);
-        if (a.sameAccount > 1) c.appendChild(badge('同帳號 ' + a.sameAccount + ' 家', 'warn'));
+      ['統編', '公司名稱', '類型', '內容', ''].forEach(function (x) { h.appendChild(el('th', {}, x)); }); t.appendChild(h);
+      list.forEach(function (g) {
+        var rep = g.items.filter(function (a) { return a.type !== 'FEE_HABIT'; })[0] || g.items[0], tr = el('tr');
+        tr.appendChild(el('td', { style: 'white-space:nowrap' }, g.companyId)); tr.appendChild(el('td', {}, g.name));
+        tr.appendChild(el('td', { style: 'white-space:nowrap' }, ALIAS_TYPE_LABEL[rep.type]));
+        var c = el('td', {}, valueText(rep)); if (rep.type === 'ACCOUNT' && rep.sameAccount > 1) c.appendChild(badge('同帳號 ' + rep.sameAccount + ' 家', 'warn'));
         tr.appendChild(c);
-        tr.appendChild(el('td', {}, ALIAS_SOURCE_LABEL[a.source] || a.source));
-        tr.appendChild(el('td', {}, String(a.useCount || 0)));
-        tr.appendChild(el('td', {}, a.lastUsedAt ? fmtTime(a.lastUsedAt) : ''));
-        tr.appendChild(el('td', {}, '')).appendChild(badge(a.status === 'ACTIVE' ? '使用中' : '已停用', a.status === 'ACTIVE' ? 'ok' : 'off'));
-        var op = el('td');
-        var ed = el('button', { class: 'linkbtn' }, '修改'); ed.disabled = !d.canWrite; ed.onclick = function () { aliasDialog(a); };
-        var tg = el('button', { class: 'linkbtn' }, a.status === 'ACTIVE' ? '停用' : '啟用'); tg.disabled = !d.canWrite;
-        tg.onclick = function () {
-          if (a.status === 'ACTIVE' && !confirm('停用後對帳時不會再用這筆來認付款人（已確認的結果不受影響）。確定停用？')) return;
-          call('bank.setAliasStatus', { aliasId: a.aliasId, status: a.status === 'ACTIVE' ? 'DISABLED' : 'ACTIVE' }, loadBank);
-        };
-        var del = el('button', { class: 'linkbtn', style: 'color:#b42318' }, '刪除'); del.disabled = !d.canWrite;
-        del.onclick = function () {
-          if (!confirm('刪除後無法復原（對帳時就不會再用它認付款人，已確認的對帳結果不受影響）。\n若只是暫時不用，請改按「停用」。\n\n確定刪除這筆？')) return;
-          call('bank.deleteAlias', { aliasId: a.aliasId }, loadBank);
-        };
-        [ed, tg, del].forEach(function (x) { x.style.marginRight = '14px'; op.appendChild(x); });
+        var op = el('td', { style: 'white-space:nowrap' });
+        if (g.items.length > 1) {
+          var tg = el('button', { class: 'linkbtn' }, '共 ' + g.items.length + ' 筆 ' + (aliasOpen[g.companyId] ? '▲' : '▼'));
+          tg.onclick = function () { aliasOpen[g.companyId] = !aliasOpen[g.companyId]; paint(); }; op.appendChild(tg);
+        } else actionsFor(rep, op);
         tr.appendChild(op); t.appendChild(tr);
+        if (g.items.length > 1 && aliasOpen[g.companyId]) {
+          g.items.forEach(function (a) {
+            var sr = el('tr', { style: 'background:#f6f8fb' });
+            sr.appendChild(el('td', {}, '')); sr.appendChild(el('td', {}, ''));
+            sr.appendChild(el('td', { style: 'white-space:nowrap' }, ALIAS_TYPE_LABEL[a.type]));
+            var sc = el('td', {}, valueText(a)); if (a.type === 'ACCOUNT' && a.sameAccount > 1) sc.appendChild(badge('同帳號 ' + a.sameAccount + ' 家', 'warn'));
+            sr.appendChild(sc);
+            var so = el('td', { style: 'white-space:nowrap' }); actionsFor(a, so); sr.appendChild(so); t.appendChild(sr);
+          });
+        }
       });
-      tbl.appendChild(t);
-      tbl.appendChild(el('div', { class: 'muted', style: 'margin-top:4px' }, '共 ' + list.length + ' 筆'));
+      var sc2 = el('div', { class: 'scrollx' }); sc2.appendChild(t); tbl.appendChild(sc2);
+      tbl.appendChild(el('div', { class: 'muted', style: 'margin-top:4px' }, '共 ' + list.length + ' 家公司'));
     }
-    search.oninput = paint; stSel.onchange = paint; typeSel.onchange = paint;
+    search.oninput = function () { aliasQ = search.value; paint(); };
+    ex.onclick = function () { order.forEach(function (id) { aliasOpen[id] = true; }); paint(); };
+    co.onclick = function () { aliasOpen = {}; paint(); };
     paint();
   }
 
@@ -2777,33 +2820,57 @@
     companies.forEach(function (c) { sel.appendChild(el('option', { value: c.id }, c.id + ' ' + (c.short || c.name))); });
   }
 
-  /** 新增（a=null）或修改一筆匯款來源 */
+  /** 修改一筆客戶資料（類型不能改；可改公司與內容） */
   function aliasDialog(a) {
-    var m = openModal(a ? '修改匯款來源' : '新增匯款來源');
-    var comp = el('select'); companyOptions(comp, bankData.companies, '請選擇公司'); if (a) comp.value = a.companyId;
-    var type = el('select'); Object.keys(ALIAS_TYPE_LABEL).forEach(function (k) { type.appendChild(el('option', { value: k }, ALIAS_TYPE_LABEL[k])); });
-    if (a) { type.value = a.type; type.disabled = true; }
-    var val = el('input', { type: 'text' }); if (a) val.value = a.value;
-    field(m, '公司', comp); field(m, '類型', type);
-    var hint = el('div', { class: 'muted' });
-    function paintHint() { hint.textContent = { ACCOUNT: '轉出帳號，例如 013-0000105035009741（空白會自動去掉）', NAME: '匯款戶名，例如 某某有限公司', TAG: '您在網銀標註的簡稱，例如 磅空', FEE_HABIT: '這家客戶慣扣的匯費金額（元）' }[type.value] || ''; }
-    type.onchange = paintHint; paintHint();
-    field(m, '內容', val, ''); m.appendChild(hint);
+    var m = openModal('修改客戶資料');
+    var comp = el('select'); companyOptions(comp, bankData.companies, '請選擇公司'); comp.value = a.companyId;
+    var val = el('input', { type: a.type === 'FEE_HABIT' ? 'number' : 'text' }); val.value = a.value;
+    field(m, '公司', comp); field(m, ALIAS_TYPE_LABEL[a.type], val);
+    if (a.type === 'FEE_HABIT') m.appendChild(el('div', { class: 'muted' }, '慣例匯費＝這家客戶平常被銀行扣的匯費（元）。對帳時差額在這個金額內自動當匯費；超過會提醒您確認。系統會在您確認匯費時自動更新。'));
     var msg = el('div', { class: 'msg err' }), acts = el('div', { class: 'actions' });
-    var cancel = el('button', { class: 'btn secondary' }, '取消'); cancel.onclick = closeModal;
-    var ok = el('button', { class: 'btn' }, '儲存');
+    var cancel = el('button', { class: 'btn secondary' }, '取消'), ok = el('button', { class: 'btn' }, '儲存');
+    cancel.onclick = closeModal;
     ok.onclick = function () {
       msg.textContent = '';
       if (!comp.value) { msg.textContent = '請選擇公司。'; return; }
       ok.disabled = true;
-      call('bank.saveAlias', { aliasId: a ? a.aliasId : undefined, companyId: comp.value, type: type.value, value: val.value }, function () { closeModal(); loadBank(); }, function (e) { ok.disabled = false; msg.textContent = e.message; });
+      call('bank.saveAlias', { aliasId: a.aliasId, companyId: comp.value, type: a.type, value: val.value }, function () { closeModal(); loadBank(); }, function (e) { ok.disabled = false; msg.textContent = e.message; });
     };
     acts.appendChild(cancel); acts.appendChild(ok); m.appendChild(msg); m.appendChild(acts);
   }
 
-  /** 建立匯款來源對照（M2 6.3，僅超管）：選歷史明細 → 瀏覽器只擷取「標註、帳號、戶名」組合（不讀金額與日期）→ 預覽 → 建立 */
+  /** 新增客戶資料：選一次公司，標註、戶名、帳號（可多個）一次填；沒填的不建立 */
+  function addCustomerDialog() {
+    var m = openModal('新增客戶資料');
+    var comp = el('select'); companyOptions(comp, bankData.companies, '請選擇公司');
+    var tag = el('input', { type: 'text', placeholder: '您在網銀打的簡稱，例如：磅空' });
+    var nm = el('input', { type: 'text', placeholder: '銀行明細上的付款人名稱，例如：某某有限公司' });
+    field(m, '公司', comp); field(m, '網銀標註', tag); field(m, '匯款戶名', nm);
+    var accBox = el('div'), accs = [];
+    function addAcc() { var i = el('input', { type: 'text', placeholder: '轉出帳號，例如：013-0000105035009741' }); i.style.marginBottom = '4px'; accs.push(i); accBox.appendChild(i); }
+    addAcc();
+    var f = el('div', { class: 'field' }); f.appendChild(el('label', {}, '轉出帳號（空白會自動去掉）')); f.appendChild(accBox);
+    var more = el('button', { class: 'linkbtn' }, '＋ 再加一個帳號'); more.onclick = addAcc; f.appendChild(more); m.appendChild(f);
+    var msg = el('div', { class: 'msg err' }), acts = el('div', { class: 'actions' });
+    var cancel = el('button', { class: 'btn secondary' }, '取消'), ok = el('button', { class: 'btn' }, '新增');
+    cancel.onclick = closeModal;
+    ok.onclick = function () {
+      msg.textContent = '';
+      var accounts = accs.map(function (i) { return i.value.trim(); }).filter(Boolean);
+      if (!comp.value) { msg.textContent = '請選擇公司。'; return; }
+      if (!tag.value.trim() && !nm.value.trim() && !accounts.length) { msg.textContent = '標註、戶名、帳號至少填一項。'; return; }
+      ok.disabled = true;
+      call('bank.addAliases', { manual: true, items: [{ companyId: comp.value, tag: tag.value.trim(), names: nm.value.trim() ? [nm.value.trim()] : [], accounts: accounts }] }, function (r) {
+        closeModal(); aliasOpen[comp.value] = true; loadBank();
+        if (!r.added) alert('這些資料都已經存在，沒有新增。');
+      }, function (e) { ok.disabled = false; msg.textContent = e.message; });
+    };
+    acts.appendChild(cancel); acts.appendChild(ok); m.appendChild(msg); m.appendChild(acts);
+  }
+
+  /** 建立客戶資料（M2 6.3，僅超管）：選歷史明細 → 瀏覽器只擷取「標註、帳號、戶名」組合（不讀金額與日期）→ 預覽 → 建立 */
   function bootstrapDialog() {
-    var m = openModal('建立匯款來源對照'); $('modal').style.width = 'min(980px,96vw)';
+    var m = openModal('建立客戶資料'); $('modal').style.width = 'min(980px,96vw)';
     m.appendChild(el('div', { class: 'muted', style: 'margin-bottom:8px' }, '請選擇已在網銀標註過的台新明細（建議最近 6～12 個月）。檔案只在這個頁面讀取，系統只會取出「標註、轉出帳號、匯款戶名」的不重複組合；金額與日期不會讀取、不會上傳。'));
     var file = el('input', { type: 'file', accept: '.xlsx,.xls', class: 'hidden' });
     var dz = el('div', { class: 'card', style: 'border:2px dashed #98a2b3;text-align:center;padding:22px' });
@@ -2880,7 +2947,7 @@
       pv.groups.forEach(function (g) { companiesOf(g).forEach(function (cid) { items.push({ companyId: cid, tag: g.tag, accounts: g.accounts, names: g.names }); }); });
       if (!items.length) { msg.textContent = '沒有可建立的項目。'; return; }
       go1.disabled = true; msg.textContent = '';
-      call('bank.bootstrapApply', { items: items }, function (r) { closeModal(); loadBank(); alert('已建立：新增 ' + r.added + ' 筆匯款來源（已存在而略過 ' + r.skipped + ' 筆）。'); }, function (e) { go1.disabled = false; msg.textContent = e.message; });
+      call('bank.bootstrapApply', { items: items }, function (r) { closeModal(); loadBank(); alert('已建立：新增 ' + r.added + ' 筆客戶資料（已存在而略過 ' + r.skipped + ' 筆）。'); }, function (e) { go1.disabled = false; msg.textContent = e.message; });
     };
     body.appendChild(msg); body.appendChild(go1);
     paintSummary();
