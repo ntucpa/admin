@@ -160,6 +160,29 @@
     return m;
   }
   function closeModal() { $('overlay').classList.add('hidden'); $('modal').innerHTML = ''; $('modal').style.width = ''; }
+  /**
+   * 檔案選擇的共用元件（開發原則：所有「選擇檔案」的地方都要同時支援拖拉與點選）。
+   * 把 dz（拖放區）接上：拖進來或點 pick 按鈕選擇的檔案，副檔名符合 extRe 才交給 onFiles(FileList 轉成陣列)；
+   * 不符合時提示。multi=false 時只收第一個檔案。
+   */
+  function wireDropZone(dz, input, pick, extRe, multi, onFiles) {
+    function take(list) {
+      var files = Array.prototype.slice.call(list || []);
+      if (!files.length) return;
+      var okFiles = files.filter(function (f) { return extRe.test(f.name); });
+      if (!okFiles.length) { alert('這裡只接受這些格式的檔案：' + (input.getAttribute('accept') || '指定格式') + '。'); return; }
+      onFiles(multi ? okFiles : okFiles.slice(0, 1));
+    }
+    if (pick) pick.onclick = function (e) { e.preventDefault(); input.click(); };
+    dz.addEventListener('click', function (e) { if (e.target === dz && !pick) input.click(); });
+    input.onchange = function () { take(input.files); input.value = ''; };
+    ['dragenter', 'dragover'].forEach(function (ev) { dz.addEventListener(ev, function (e) { e.preventDefault(); e.stopPropagation(); dz.style.background = '#e8eef5'; }); });
+    dz.addEventListener('dragleave', function (e) { e.preventDefault(); dz.style.background = ''; });
+    dz.addEventListener('drop', function (e) { e.preventDefault(); e.stopPropagation(); dz.style.background = ''; take(e.dataTransfer && e.dataTransfer.files); });
+  }
+  /** 沒拖進拖放區就放開時，不讓瀏覽器把檔案「打開」而離開後台頁面 */
+  ['dragover', 'drop'].forEach(function (ev) { window.addEventListener(ev, function (e) { if (e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], 'Files') >= 0) e.preventDefault(); }); });
+
   function field(parent, label, input, hint) {
     var f = el('div', { class: 'field' });
     f.appendChild(el('label', {}, label));
@@ -2131,12 +2154,15 @@
   function bootstrapDialog() {
     var m = openModal('建立匯款來源對照'); $('modal').style.width = 'min(980px,96vw)';
     m.appendChild(el('div', { class: 'muted', style: 'margin-bottom:8px' }, '請選擇已在網銀標註過的台新明細（建議最近 6～12 個月）。檔案只在這個頁面讀取，系統只會取出「標註、轉出帳號、匯款戶名」的不重複組合；金額與日期不會讀取、不會上傳。'));
-    var file = el('input', { type: 'file', accept: '.xlsx,.xls' });
+    var file = el('input', { type: 'file', accept: '.xlsx,.xls', class: 'hidden' });
+    var dz = el('div', { class: 'card', style: 'border:2px dashed #98a2b3;text-align:center;padding:22px' });
+    dz.appendChild(document.createTextNode('把台新明細 Excel 拖到這裡，或 '));
+    var pickBtn = el('button', { class: 'btn small' }, '選擇檔案'); dz.appendChild(pickBtn); dz.appendChild(file);
     var info = el('div', { class: 'muted', style: 'margin:6px 0' }), body = el('div');
-    m.appendChild(file); m.appendChild(info); m.appendChild(body);
+    m.appendChild(dz); m.appendChild(info); m.appendChild(body);
     var close = el('div', { class: 'actions' }), cl = el('button', { class: 'btn secondary' }, '關閉'); cl.onclick = closeModal; close.appendChild(cl); m.appendChild(close);
-    file.onchange = function () {
-      var f = file.files && file.files[0]; if (!f) return;
+    wireDropZone(dz, file, pickBtn, /\.xlsx?$/i, false, function (files) {
+      var f = files[0];
       body.innerHTML = ''; info.textContent = '讀取中…';
       readBankFile(f).then(function (r) {
         if (!r.ok) { info.textContent = ''; body.appendChild(el('div', { class: 'msg err' }, r.message)); return; }
@@ -2146,7 +2172,7 @@
         info.textContent += ' 正在比對公司…';
         call('bank.bootstrapPreview', { combos: combos }, function (pv) { info.textContent = info.textContent.replace(' 正在比對公司…', ''); renderBootstrap(body, pv); }, function (e) { info.textContent = ''; body.appendChild(el('div', { class: 'msg err' }, e.message)); });
       }, function (e) { info.textContent = ''; body.appendChild(el('div', { class: 'msg err' }, e.message || '讀取失敗')); });
-    };
+    });
   }
 
   function renderBootstrap(body, pv) {
@@ -2914,12 +2940,7 @@
   }
 
   (function () {
-    var dz = $('upDrop'), fi = $('upFile');
-    $('upPick').onclick = function () { fi.click(); };
-    fi.onchange = function () { if (fi.files.length) addUploadFiles(fi.files); fi.value = ''; };
-    ['dragenter', 'dragover'].forEach(function (ev) { dz.addEventListener(ev, function (e) { e.preventDefault(); dz.style.background = '#e8eef5'; }); });
-    ['dragleave', 'drop'].forEach(function (ev) { dz.addEventListener(ev, function (e) { e.preventDefault(); dz.style.background = ''; }); });
-    dz.addEventListener('drop', function (e) { if (e.dataTransfer && e.dataTransfer.files.length) addUploadFiles(e.dataTransfer.files); });
+    wireDropZone($('upDrop'), $('upFile'), $('upPick'), /\.pdf$/i, true, addUploadFiles);
     $('upImportBtn').onclick = runImport;
     $('upClearBtn').onclick = function () { ups = []; $('upProgress').textContent = ''; renderUploads(); };
     $('upBackBtn').onclick = function () { go('tax'); };
