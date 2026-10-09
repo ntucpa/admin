@@ -364,6 +364,7 @@
     if (page === 'tax') loadTax();
     if (page === 'bank') showBankPage();
     if (page === 'home') call('getHome', {}, renderHome);
+    if (page === 'overview') loadOverview();
     if (page === 'companies') loadCompanies();
     if (page === 'bindings') loadBindings();
     if (page === 'customers') loadCustomers();
@@ -391,7 +392,8 @@
       d.companies.forEach(function (c) {
         var tr = el('tr');
         tr.appendChild(el('td', {}, c.companyId));
-        tr.appendChild(el('td', {}, c.name + (c.fullName ? '（' + c.fullName + '）' : '')));
+        var nmTd = el('td'), nmBtn = el('button', { class: 'linkbtn', style: 'text-decoration:none;color:inherit;text-align:left', title: '點一下看這家的客戶總覽' }, c.name + (c.fullName ? '（' + c.fullName + '）' : ''));
+        nmBtn.onclick = function () { openOverview(c.companyId); }; nmTd.appendChild(nmBtn); tr.appendChild(nmTd);
         var st = el('td'); st.appendChild(c.status === 'ACTIVE' ? badge('啟用', 'ok') : badge('停用', 'off')); tr.appendChild(st);
         var fd = el('td'); fd.appendChild(folderLink(c.folderId)); tr.appendChild(fd);
         var op = el('td');
@@ -1674,6 +1676,122 @@
     sec.onclick = toggle;
     sec.onkeydown = function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } };
   });
+
+
+  /* ---------- 客戶總覽與頂端搜尋（選單改版第二步） ---------- */
+  var coCache = null, coCacheAt = 0, coSel = -1, coMatches = [];
+  function coLoad(cb) {
+    if (coCache && Date.now() - coCacheAt < 5 * 60 * 1000) return cb(coCache);
+    call('listCompanies', {}, function (d) { coCache = d.companies || []; coCacheAt = Date.now(); cb(coCache); }, function () { cb(coCache || []); });
+  }
+  function coRender() {
+    var box = $('coSearchList'), q = ($('coSearch').value || '').trim().toLowerCase();
+    box.innerHTML = '';
+    if (!q) { box.classList.add('hidden'); return; }
+    coLoad(function (list) {
+      coMatches = list.filter(function (c) { return (c.companyId + ' ' + c.name + ' ' + (c.fullName || '')).toLowerCase().indexOf(q) >= 0; }).slice(0, 10);
+      box.innerHTML = ''; coSel = coMatches.length ? 0 : -1;
+      if (!coMatches.length) box.appendChild(el('div', { class: 'none' }, '找不到符合的客戶（只會列出您負責的公司）'));
+      coMatches.forEach(function (c, i) {
+        var it = el('div', { class: 'it' + (i === coSel ? ' sel' : ''), role: 'option' });
+        it.appendChild(el('span', { class: 'id' }, c.companyId));
+        it.appendChild(el('span', {}, c.name + (c.status === 'ACTIVE' ? '' : '（停用）')));
+        it.onmousedown = function (e) { e.preventDefault(); coPick(c.companyId); };
+        box.appendChild(it);
+      });
+      box.classList.remove('hidden');
+    });
+  }
+  function coPick(id) {
+    $('coSearch').value = ''; $('coSearchList').classList.add('hidden'); $('coSearch').blur();
+    openOverview(id);
+  }
+  $('coSearch').oninput = coRender;
+  $('coSearch').onfocus = function () { coLoad(function () {}); if ($('coSearch').value) coRender(); };
+  $('coSearch').onblur = function () { setTimeout(function () { $('coSearchList').classList.add('hidden'); }, 150); };
+  $('coSearch').onkeydown = function (e) {
+    var items = $('coSearchList').querySelectorAll('.it');
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault(); if (!items.length) return;
+      coSel = (coSel + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+      items.forEach(function (n, i) { n.classList.toggle('sel', i === coSel); });
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      var q = ($('coSearch').value || '').trim();
+      if (coMatches[coSel]) coPick(coMatches[coSel].companyId);
+      else if (/^\d{8}$/.test(q)) coPick(q);
+    } else if (e.key === 'Escape') { $('coSearchList').classList.add('hidden'); }
+  };
+
+  var ovCompanyId = '';
+  function openOverview(companyId) { ovCompanyId = String(companyId || ''); go('overview'); }
+  function ovRow(card, k, v) { var r = el('div', { class: 'ovrow' }); r.appendChild(el('span', { class: 'k' }, k)); var vv = el('span'); if (v && v.nodeType) vv.appendChild(v); else vv.textContent = (v === null || v === undefined || v === '') ? '—' : String(v); r.appendChild(vv); card.appendChild(r); }
+  function ovCard(box, title) { var c = el('div', { class: 'card' }); c.appendChild(el('div', { class: 'card-title' }, title)); box.appendChild(c); return c; }
+  function ovGo(card, text, page) { var b = el('button', { class: 'linkbtn ovlink' }, text + ' →'); b.onclick = function () { go(page); }; card.appendChild(b); }
+  function loadOverview() {
+    var box = $('ovBox');
+    if (!ovCompanyId) { $('ovTitle').textContent = '客戶總覽'; box.textContent = '請在上方搜尋框輸入統編或名稱。'; return; }
+    box.textContent = '載入中…';
+    call('overview.company', { companyId: ovCompanyId }, function (d) {
+      var c = d.company;
+      $('ovTitle').textContent = (c.shortName || c.name) + '　' + c.companyId;
+      box.innerHTML = '';
+      if (d.stale) box.appendChild(el('div', { class: 'alert' }, '系統同步異常，以下資料可能不是最新的。'));
+      var grid = el('div', { class: 'ovgrid' }); box.appendChild(grid);
+
+      var k1 = ovCard(grid, '基本資料');
+      ovRow(k1, '公司全名', c.fullName || c.name);
+      ovRow(k1, '簡稱', c.shortName || c.name);
+      ovRow(k1, '狀態', badge(c.status === 'ACTIVE' ? '啟用' : '停用', c.status === 'ACTIVE' ? 'ok' : 'off'));
+      ovRow(k1, '負責人員', d.responsible.length ? d.responsible.join('、') : '（尚未指派）');
+      ovRow(k1, '客戶資料夾', c.folderId ? folderLink(c.folderId) : '（未設定）');
+      if (d.tax && (d.tax.profile.taxNotes || d.tax.profile.bookkeepingNotes)) {
+        if (d.tax.profile.taxNotes) ovRow(k1, '申報注意事項', d.tax.profile.taxNotes);
+        if (d.tax.profile.bookkeepingNotes) ovRow(k1, '帳務注意事項', d.tax.profile.bookkeepingNotes);
+      }
+
+      if (d.tax) {
+        var k2 = ovCard(grid, '營業稅');
+        if (!d.tax.profile.vatFiling || d.tax.profile.vatExcluded) k2.appendChild(el('div', { class: 'muted' }, '這家設為非營業稅申報客戶。'));
+        if (!d.tax.periods.length) k2.appendChild(el('div', { class: 'muted' }, '尚無營業稅期別資料。'));
+        d.tax.periods.forEach(function (p) {
+          var v = el('span');
+          v.appendChild(badge(p.stageLabel, p.stage === 'DONE' ? 'ok' : (p.applicable ? '' : 'off')));
+          v.appendChild(document.createTextNode('　' + p.doneCount + '／' + p.totalSteps + (p.taxAmount !== null ? '　稅額 ' + money(p.taxAmount) : '') + (p.lastStep ? '　最後：' + p.lastStep.label + ' ' + String(p.lastStep.date || '').slice(5) : '')));
+          ovRow(k2, p.label + (p.periodStatus === 'CLOSED' ? '（已結案）' : ''), v);
+        });
+        if (d.tax.profile.selfPay) k2.appendChild(el('div', { class: 'muted' }, '繳稅方式：自繳'));
+        ovGo(k2, '到營業稅頁', 'tax');
+      }
+
+      if (d.bank) {
+        var k3 = ovCard(grid, '收款');
+        ovRow(k3, '待收請款單', d.bank.openBills ? d.bank.openBills + ' 張，共 ' + money(d.bank.outstanding) + ' 元' : '沒有');
+        ovRow(k3, '先代墊未收回', d.bank.advancesOpen ? d.bank.advancesOpen + ' 筆，共 ' + money(d.bank.advanceOutstanding) + ' 元' : '沒有');
+        d.bank.bills.slice(0, 4).forEach(function (x) {
+          ovRow(k3, x.billingPeriod + ' ' + (KIND_LABEL[x.kind] || x.kind || ''), money(x.total) + '　' + x.statusLabel + (x.reportedAt && x.status === 'REPORTED' ? '（' + x.reportedAt.slice(5) + '）' : ''));
+        });
+        ovGo(k3, '到收款對帳', 'bank');
+      }
+
+      var k4 = ovCard(grid, '聯絡人（LINE 綁定）');
+      if (!d.contacts.length) k4.appendChild(el('div', { class: 'muted' }, '尚無綁定的聯絡人。'));
+      d.contacts.forEach(function (x) { ovRow(k4, x.name + (x.lineName && x.lineName !== x.name ? '（' + x.lineName + '）' : ''), badge(x.statusLabel, x.status === 'ACTIVE' ? 'ok' : (x.status === 'SUSPENDED' ? 'off' : 'warn'))); });
+      if (d.pendingBindings) ovRow(k4, '待審核綁定', d.pendingBindings + ' 件');
+      if (d.revokedContacts) k4.appendChild(el('div', { class: 'muted' }, '另有 ' + d.revokedContacts + ' 位已解除綁定。'));
+      ovGo(k4, '到客戶聯絡人', 'customers');
+
+      if (d.intake) {
+        var k5 = ovCard(grid, '客戶上傳文件');
+        if (!d.intake.length) k5.appendChild(el('div', { class: 'muted' }, '尚無上傳紀錄。'));
+        d.intake.forEach(function (m) { ovRow(k5, m.yearMonth.slice(0, 3) + ' 年 ' + Number(m.yearMonth.slice(3)) + ' 月', m.files + ' 份（已處理 ' + m.processed + (m.review ? '、待確認 ' + m.review : '') + '）' + (m.lastReceivedAt ? '　最後 ' + fmtTime(m.lastReceivedAt) : '')); });
+        ovGo(k5, '到客戶上傳文件', 'intake');
+      }
+
+      var k6 = ovCard(grid, '公司股東資訊');
+      k6.appendChild(el('div', { class: 'muted' }, '「公司股東資訊申報」開發中，完成後會顯示在這裡。'));
+    }, function (e) { box.innerHTML = ''; box.appendChild(el('div', { class: 'alert' }, e.message)); });
+  }
 
   function closeMenu() { $('nav').classList.remove('open'); $('navMask').classList.remove('open'); }
   $('menuBtn').onclick = function () { $('nav').classList.add('open'); $('navMask').classList.add('open'); };

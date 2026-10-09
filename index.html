@@ -28,6 +28,21 @@
     nav .grp a.active { padding-left:25px; }
     nav .grp a.sub2 { padding-left:44px; font-size:13px; }
     nav .grp a.sub2.active { padding-left:41px; }
+    .cosearch { position:relative; margin-left:16px; }
+    .cosearch input { width:min(300px,34vw); padding:6px 10px; border-radius:6px; border:1px solid rgba(255,255,255,.5); background:rgba(255,255,255,.12); color:#fff; font-size:13px; }
+    .cosearch input::placeholder { color:rgba(255,255,255,.75); }
+    .cosearch input:focus { outline:none; background:#fff; color:#1f2d3d; }
+    #coSearchList { position:absolute; top:34px; left:0; width:min(360px,80vw); background:#fff; color:#1f2d3d; border:1px solid var(--line); border-radius:8px; box-shadow:0 6px 20px rgba(15,23,42,.15); z-index:30; max-height:340px; overflow:auto; }
+    #coSearchList .it { padding:8px 12px; cursor:pointer; font-size:13px; display:flex; gap:10px; }
+    #coSearchList .it:hover, #coSearchList .it.sel { background:#e8eef5; }
+    #coSearchList .it .id { color:#667085; width:72px; flex-shrink:0; }
+    #coSearchList .none { padding:10px 12px; color:#667085; font-size:13px; }
+    .ovgrid { display:grid; grid-template-columns:repeat(auto-fill,minmax(320px,1fr)); gap:16px; }
+    .ovgrid .card { margin-bottom:0; }
+    .ovrow { display:flex; justify-content:space-between; gap:12px; padding:4px 0; border-bottom:1px dashed #eef1f5; font-size:13px; }
+    .ovrow:last-child { border-bottom:none; }
+    .ovrow .k { color:#667085; }
+    .ovlink { font-size:12px; margin-top:8px; }
     nav .devtag { font-size:11px; color:#b54708; background:#fef0c7; border-radius:8px; padding:0 6px; margin-left:6px; font-weight:400; }
     main { flex:1; padding:24px; max-width:1100px; }
     h1 { font-size:20px; color:var(--navy); margin:0 0 16px; display:flex; align-items:center; gap:12px; }
@@ -124,6 +139,10 @@
     <header>
       <button id="menuBtn" aria-label="選單">☰</button>
       <span class="brand">永承事務所管理系統｜管理後台</span>
+      <div class="cosearch">
+        <input id="coSearch" type="search" placeholder="搜尋客戶：統編或名稱" autocomplete="off" aria-label="搜尋客戶">
+        <div id="coSearchList" class="hidden" role="listbox"></div>
+      </div>
       <span class="spacer"></span>
       <button id="memoBtn" class="hidden" aria-label="我的備忘" style="margin-right:8px"></button>
       <span class="who" id="who"></span>
@@ -168,6 +187,10 @@
         </div>
       </nav>
       <main>
+        <section id="page-overview" class="hidden">
+          <h1 id="ovTitle">客戶總覽</h1>
+          <div id="ovBox">請在上方搜尋框輸入統編或名稱。</div>
+        </section>
         <section id="page-dev" class="hidden">
           <h1 id="devTitle">開發中</h1>
           <div class="card" id="devBox"></div>
@@ -387,10 +410,10 @@
 
   <div id="overlay" class="overlay hidden"><div class="modal" id="modal"></div></div>
 
-  <script src="bill-parser.js?v=0.40.1"></script>
+  <script src="bill-parser.js?v=0.41.0"></script>
   <script src="bank-parse.js?v=0.31.0"></script>
   <script src="bank-match.js?v=0.31.0"></script>
-  <script src="config.js?v=0.40.1"></script>
-  <script src="app.js?v=0.40.1"></script>
+  <script src="config.js?v=0.41.0"></script>
+  <script src="app.js?v=0.41.0"></script>
 </body>
 </html>
