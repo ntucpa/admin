@@ -96,11 +96,13 @@
         }
         if (hit) {
           var total = hit.set.reduce(function (a, x) { return a + x.amount; }, 0);
+          // 合計剛好等於請款單（沒有差匯費）、付款人已知且只對到一家公司 → 視同完全相符（預設打勾，仍需按「送出」；業主 2026-10-09 決定）；有差匯費或付款人靠名稱猜的仍是建議
+          var stC = hit.b.amount === total ? decide(p.known, single) : 'PROPOSED';
           hit.set.forEach(function (x, idx) {
             var last = idx === hit.set.length - 1;
             var alloc = [{ billId: hit.b.billId, companyId: hit.b.companyId, allocated: x.amount, fee: last ? hit.b.amount - total : 0 }];
-            if (x === t) done(t, 'PROPOSED', 'C', p.known, alloc);
-            else results[x.id] = { txnId: x.id, status: 'PROPOSED', rule: 'C', known: p.known, allocations: alloc };
+            if (x === t) done(t, stC, 'C', p.known, alloc);
+            else results[x.id] = { txnId: x.id, status: stC, rule: 'C', known: p.known, allocations: alloc };
           });
           return;
         }
