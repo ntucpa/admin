@@ -319,6 +319,12 @@
       var pct = rn.budgetMinutes ? Math.round(rn.minutesToday / rn.budgetMinutes * 100) : 0;
       $('statUsage').textContent = '約 ' + rn.minutesToday + ' ／ ' + rn.budgetMinutes + ' 分鐘';
       $('statUsage').className = 'value' + (rn.stopped ? ' err' : pct >= rn.warnPercent ? ' warn' : '');
+      // 滑過數字可看「今天額度花在哪」（毫秒累計換算成分鐘）：副本同步、LINE 發送佇列、歸檔等主要工作、文件目錄索引、申報書讀取
+      if (rn.parts) {
+        var PN = { sync: '副本同步', notice: 'LINE 發送佇列', round: '歸檔等主要工作', dix: '文件目錄索引', docs: '申報書讀取', flush: '資料推送' };
+        var tip = Object.keys(PN).filter(function (k) { return rn.parts[k]; }).map(function (k) { return PN[k] + ' ' + (Math.round(rn.parts[k] / 6000) / 10) + ' 分'; });
+        $('statUsage').title = tip.length ? '今日各部分耗時：' + tip.join('、') : '';
+      }
       $('statUsageNote').textContent = rn.stopped
         ? (rn.lastHeartbeatAt ? '背景處理已停止，可能是今日額度已用完，請稍後查看或聯絡系統維護人員' : '背景處理尚未啟動')
         : '最後運作：' + fmtTime(rn.lastHeartbeatAt) + (rn.hasPendingWork ? '｜有工作處理中' : '');
@@ -1689,6 +1695,14 @@
     var bu = el('button', { class: 'btn small' }, '上傳請款單'); bu.onclick = function () { go('taxup'); }; bar.appendChild(bu);
     if (d.caps.isSuper) { var bs = el('button', { class: 'btn small secondary' }, '模組設定'); bs.onclick = function () { go('taxsettings'); }; bar.appendChild(bs); }
     var b5 = el('button', { class: 'btn small secondary' }, '重新整理'); b5.onclick = function () { loadTax(d.period && d.period.periodId); }; bar.appendChild(b5);
+    // 文件目錄索引立即更新：把檔案拖進客戶資料夾後不想等 5 分鐘時按（一次涵蓋全部公司，不是整家重掃；申報書約 1 分鐘內讀取）
+    var b6 = el('button', { class: 'btn small secondary', title: '把檔案拖進雲端硬碟資料夾後，不想等 5 分鐘時按：立刻更新文件目錄，並讀取新的申報書與繳稅回執' }, '立即更新文件');
+    b6.onclick = function () {
+      b6.disabled = true; var old = b6.textContent; b6.textContent = '更新中…';
+      call('indexRefreshNow', {}, function (r) { b6.disabled = false; b6.textContent = old; alert(r.message || '已更新'); if (r.ran) loadTax(d.period && d.period.periodId); },
+        function (e) { b6.disabled = false; b6.textContent = old; alert(e.message); });
+    };
+    bar.appendChild(b6);
     var ss = $('taxStepSel'); ss.innerHTML = ''; d.steps.forEach(function (c) { ss.appendChild(el('option', { value: c }, STEP_LABELS[c])); });
     var nb = $('taxNotice'); nb.innerHTML = ''; nb.classList.add('hidden');
     function note(text, label, fn) {
