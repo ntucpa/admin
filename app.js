@@ -2052,7 +2052,7 @@
   var RULE_LABEL = { A: '金額相符', B: '差匯費', C: '分次加總', D: '一筆多張', E: '只憑金額', F: '金額不符（部分收款或差額）', MANUAL: '手動指定', TAX_REF: '銷帳編號＋稅額' };
   var BANK_TABS = [['exact', '完全相符'], ['propose', '建議'], ['unmatched', '未對上'], ['tax', '代繳稅款'], ['othertax', '其他代繳稅款'], ['done', '已處理／非客戶']];
   function dateRange() { var d = bs.txns.map(function (t) { return t.dt.slice(0, 10); }).sort(); return { from: d[0], to: d[d.length - 1] }; }
-  function reloadCtx(then) { call('bank.getContext', dateRange(), function (ctx) { bs.ctx = ctx; buildRows(); renderStmt(); if (then) then(); }, function (e) { renderStmt(); alert('重新取得比對資料失敗：' + e.message + '\n請重新整理頁面。'); }); }
+  function reloadCtx(then) { call('bank.getContext', dateRange(), function (ctx) { bs.ctx = ctx; bs.ctxAt = new Date(); buildRows(); renderStmt(); if (then) then(); }, function (e) { renderStmt(); alert('重新取得比對資料失敗：' + e.message + '\n請重新整理頁面。'); }); }
   function money(n) { return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
   function sha256Hex(text) { return crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)).then(hex); }
   function dateMs(dt) { return Date.parse(dt.slice(0, 10).replace(/\//g, '-') + 'T00:00:00'); }
@@ -2065,7 +2065,7 @@
     });
     $('bankStmtView').classList.toggle('hidden', bankTab !== 'stmt');
     $('bankAliasView').classList.toggle('hidden', bankTab !== 'alias');
-    if (bankTab === 'alias') loadBank(); else renderStmtStart();
+    if (bankTab === 'alias') loadBank(); else if (bs && bs.rows) reloadCtx(); else renderStmtStart();
   }
   var bankTab = 'stmt';
 
@@ -2096,7 +2096,7 @@
         r.txns.forEach(function (t, i) { t.key = keys[i]; seqOf[t.key] = (seqOf[t.key] || 0) + 1; t.seq = seqOf[t.key]; });
         msg.textContent = '取得比對資料…';
         call('bank.getContext', { from: dts[0], to: dts[dts.length - 1] }, function (ctx) {
-          bs = { fileName: file.name, txns: r.txns, ctx: ctx, tab: 'exact', rows: null, sug: null };
+          bs = { fileName: file.name, txns: r.txns, ctx: ctx, ctxAt: new Date(), tab: 'exact', rows: null, sug: null };
           buildRows(); renderStmt();
         }, function (e) { msg.textContent = ''; msg.appendChild(el('span', { class: 'msg err' }, e.message)); });
       });
@@ -2155,7 +2155,14 @@
     var head = el('div', { class: 'toolbar' });
     head.appendChild(el('strong', {}, bs.fileName));
     var again = el('button', { class: 'btn small secondary' }, '重新選檔（捨棄目前畫面）'); again.onclick = function () { if (!confirm('目前畫面上尚未送出的勾選與指定都會捨棄。確定重新選檔？')) return; bs = null; renderStmtStart(); };
-    head.appendChild(again); box.appendChild(head);
+    head.appendChild(again);
+    var refresh = el('button', { class: 'btn small secondary' }, '重新取得請款單與匯款來源');
+    refresh.title = '剛匯入請款單、剛加入匯款來源、或別人剛送出對帳時按這個（不用重新選檔）';
+    refresh.onclick = function () { refresh.disabled = true; reloadCtx(); };
+    head.appendChild(refresh);
+    var at = bs.ctxAt ? bs.ctxAt.getHours() + ':' + ('0' + bs.ctxAt.getMinutes()).slice(-2) : '';
+    head.appendChild(el('span', { class: 'muted' }, '比對資料取得時間 ' + at + '（待收請款單 ' + bs.ctx.bills.length + ' 張、匯款來源 ' + bs.ctx.aliases.length + ' 筆）'));
+    box.appendChild(head);
     var counts = {}; rows.forEach(function (r) { var t = tabOf(r); counts[t] = (counts[t] || 0) + 1; });
     var doneN = rows.filter(function (r) { return r.done; }).length;
     box.appendChild(el('div', { class: 'muted', style: 'margin-bottom:6px' }, '共 ' + rows.length + ' 筆（存入與繳費轉出）；先前已處理 ' + doneN + ' 筆不再列出。交易明細只在這個頁面，關閉或重新整理就消失。'));
