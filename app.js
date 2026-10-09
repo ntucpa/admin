@@ -330,6 +330,7 @@
         ? (rn.lastHeartbeatAt ? '背景處理已停止，可能是今日額度已用完，請稍後查看或聯絡系統維護人員' : '背景處理尚未啟動')
         : '最後運作：' + fmtTime(rn.lastHeartbeatAt) + (rn.hasPendingWork ? '｜有工作處理中' : '');
     }
+    renderHomeTodo(home);
     var box = $('sysCard'); box.innerHTML = '';
     box.appendChild(el('div', { class: 'muted' }, home.firmName + '｜系統版本 ' + home.version + '｜伺服器時間 ' + home.serverTime));
     if (home.system) {
@@ -1794,6 +1795,105 @@
     }, function (e) { box.innerHTML = ''; box.appendChild(el('div', { class: 'alert' }, e.message)); });
   }
 
+
+  /* ---------- 首頁「今天要做什麼」（選單改版第三步）：跨模組彙整稅務申報、收款對帳、客戶管理、系統的待辦 ---------- */
+  var homeTodoSeq = 0;
+  var taxPending = null; // 從首頁卡片跳到營業稅頁後要做的事：{ type:'focus', label, ids } 或 { type:'notice', kind }
+  function hasFeat(f) { return !!me && (me.role === 'SUPER_ADMIN' || (me.features || []).indexOf(f) >= 0); }
+  function renderHomeTodo(home) {
+    var box = $('homeTodo'), seq = ++homeTodoSeq;
+    if (!hasFeat('TAX_CHECKLIST')) { drawHomeTodo(box, home, null); return; }
+    if (!box.childNodes.length) box.appendChild(el('div', { class: 'muted', style: 'margin-bottom:10px' }, '整理今天的待辦…'));
+    call('tax.getHome', {}, function (th) { if (seq === homeTodoSeq) drawHomeTodo(box, home, th); },
+      function () { if (seq === homeTodoSeq) drawHomeTodo(box, home, null); });
+  }
+  function todoLine(parent, text, label, fn) {
+    var ln = el('div', { class: 'ln' }); ln.appendChild(document.createTextNode(text + ' '));
+    if (label) { var b = el('button', { class: 'linkbtn' }, label); b.onclick = fn; ln.appendChild(b); }
+    parent.appendChild(ln);
+  }
+  function todoCard(grid, n, label, hint, fn) {
+    var c = el('button', { class: 'card', title: hint || '' });
+    c.appendChild(el('div', { class: 'n' }, String(n))); c.appendChild(el('div', { class: 'l' }, label));
+    if (hint) c.appendChild(el('div', { class: 'muted', style: 'font-size:12px' }, hint));
+    c.onclick = fn; grid.appendChild(c);
+  }
+  function goTaxWith(action) { taxPending = action; go('tax'); }
+  function drawHomeTodo(box, home, th) {
+    box.innerHTML = '';
+    box.appendChild(el('div', { class: 'hsec' }, '今天要做什麼'));
+    var cn = home.counts || {};
+
+    if (th && th.period && th.deadlines) {
+      var d = th.deadlines, bar = el('div', { class: 'card', style: 'display:flex;gap:18px;flex-wrap:wrap;align-items:center;margin-bottom:10px;padding:10px 14px' });
+      bar.appendChild(el('strong', {}, '營業稅 ' + th.period.label));
+      var c1 = el('span', {}, '申報期限 ' + d.deadline + '　'); c1.appendChild(el('strong', { style: d.daysToDeadline != null && d.daysToDeadline < 0 ? 'color:var(--danger)' : '' }, countdown(d.daysToDeadline))); bar.appendChild(c1);
+      bar.appendChild(el('span', { class: 'muted' }, '繳稅期限 ' + d.payDeadline + '　' + countdown(d.daysToPayDeadline)));
+      box.appendChild(bar);
+    }
+
+    // 異常（紅）：稅務與收款的異常、系統異常清單、備份
+    var errs = el('div', { class: 'todo-box todo-err' }), nErr = 0;
+    errs.appendChild(el('div', { class: 'ttl' }, '異常'));
+    ((th && th.anomalies) || []).forEach(function (x) { if (!x.items.length) return; nErr++; todoLine(errs, (x.severity === 'high' ? '嚴重｜' : '') + x.label + '：' + x.items.length + ' ' + (x.unit || '家'), '到營業稅頁', function () { goTaxWith(null); }); });
+    if (cn.exceptions && hasFeat('EXCEPTION_HANDLING')) { nErr++; todoLine(errs, '異常清單（LINE 文件、雲端權限）：' + cn.exceptions + ' 件', '到異常處理', function () { go('exceptions'); }); }
+    var bk = home.backup;
+    if (bk && bk.enabled && bk.lastFailed) { nErr++; todoLine(errs, '系統備份失敗', '到備份', function () { go('backup'); }); }
+    var rn = home.runner;
+    if (rn && rn.stopped && rn.lastHeartbeatAt) { nErr++; todoLine(errs, '背景處理已停止（可能是今日額度用完）', '', null); }
+    if (nErr) box.appendChild(errs);
+
+    // 新動態（藍）
+    var nw = (th && th.news) || { moreInvoices: [], afterFiled: [], excluded: [] };
+    var newsParts = [];
+    if (nw.moreInvoices.length) newsParts.push('客戶又傳了發票 ' + nw.moreInvoices.length + ' 家');
+    if (nw.afterFiled.length) newsParts.push('申報後又收到檔案 ' + nw.afterFiled.length + ' 家');
+    if (nw.excluded.length) newsParts.push('非營業稅申報客戶有新動態 ' + nw.excluded.length + ' 家');
+    if (newsParts.length) { var nb = el('div', { class: 'todo-box todo-news' }); nb.appendChild(el('div', { class: 'ttl' }, '新動態')); todoLine(nb, newsParts.join('、'), '到營業稅頁查看', function () { goTaxWith(null); }); box.appendChild(nb); }
+
+    // 我的備忘（黃）
+    if (th && th.memos) {
+      var open = th.memos.filter(function (m) { return !m.done; });
+      if (open.length) {
+        var mb = el('div', { class: 'todo-box todo-memo' });
+        var dueN = open.filter(function (m) { return m.dueDate && m.dueDate <= th.today; }).length;
+        mb.appendChild(el('div', { class: 'ttl' }, '我的備忘（' + open.length + ' 則待辦' + (dueN ? '，' + dueN + ' 則已到期' : '') + '）'));
+        open.slice(0, 3).forEach(function (m) { var late = m.dueDate && m.dueDate <= th.today; mb.appendChild(el('div', { class: 'ln', style: late ? 'font-weight:700;color:var(--danger)' : '' }, '・' + m.text + (m.dueDate ? '（' + m.dueDate.slice(5) + '）' : ''))); });
+        todoLine(mb, open.length > 3 ? '還有 ' + (open.length - 3) + ' 則' : '', '管理備忘', function () { scrollToMemo = true; goTaxWith(null); });
+        box.appendChild(mb);
+      }
+    }
+
+    // 待辦卡片：依模組分組，只列有數字的
+    var any = false;
+    function group(title, items) {
+      items = items.filter(function (x) { return x.n; });
+      if (!items.length) return;
+      any = true;
+      box.appendChild(el('div', { class: 'todo-grp' }, title));
+      var grid = el('div', { class: 'todo-cards' });
+      items.forEach(function (x) { todoCard(grid, x.n, x.label, x.hint, x.fn); });
+      box.appendChild(grid);
+    }
+    if (th && th.cards) {
+      var taxCards = th.cards.filter(function (c) { return c.key !== 'reconDiff' && c.key !== 'reportedLate'; });
+      group('營業稅', taxCards.map(function (c) {
+        return { n: c.count, label: c.label, hint: c.hint, fn: function () { goTaxWith(CARD_NOTICE[c.key] ? { type: 'notice', kind: CARD_NOTICE[c.key] } : { type: 'focus', label: c.label, ids: c.filingIds }); } };
+      }));
+      var bankCards = th.cards.filter(function (c) { return c.key === 'reconDiff' || c.key === 'reportedLate'; });
+      group('收款對帳', bankCards.map(function (c) { return { n: c.count, label: c.label, hint: c.hint, fn: function () { openLedger('ALL', c.key === 'reconDiff' ? 'diff' : 'reportedLate'); } }; }));
+    }
+    var custItems = [];
+    if (home.pendingBindings && hasFeat('BINDING_APPROVAL')) custItems.push({ n: home.pendingBindings, label: '待審核綁定', hint: '客戶送出的綁定申請', fn: function () { go('bindings'); } });
+    if (cn.unclassified && cn.unclassified.files) custItems.push({ n: cn.unclassified.customers, label: '未分類文件的客戶', hint: cn.unclassified.files + ' 份，最久等待 ' + cn.unclassified.oldestDays + ' 天', fn: function () { go('unclassified'); } });
+    var ik = home.intake;
+    if (ik && ik.enabled && ik.months) custItems.push({ n: ik.months, label: '待處理上傳文件', hint: ik.files + ' 份' + (ik.review ? '，' + ik.review + ' 份需人工確認' : ''), fn: function () { go('intake'); } });
+    group('客戶管理', custItems);
+    if (bk && bk.enabled && bk.ackOverdue) group('系統', [{ n: bk.daysSinceAck, label: '天沒下載備份到地端', hint: '每月下載一次備份 ZIP', fn: function () { go('backup'); } }]);
+
+    if (!any && !nErr && !newsParts.length) box.appendChild(el('div', { class: 'card muted', style: 'padding:12px 14px' }, '目前沒有待辦事項。'));
+  }
+
   function closeMenu() { $('nav').classList.remove('open'); $('navMask').classList.remove('open'); }
   $('menuBtn').onclick = function () { $('nav').classList.add('open'); $('navMask').classList.add('open'); };
   $('navMask').onclick = closeMenu;
@@ -1826,7 +1926,12 @@
     $('taxBox').textContent = '載入中…';
     taxAFocus = null;
     loadTaxHome(periodId);
-    call('tax.getBoard', { taxType: 'VAT', periodId: periodId || undefined }, function (d) { taxData = d; taxSel = {}; renderTax(); },
+    call('tax.getBoard', { taxType: 'VAT', periodId: periodId || undefined }, function (d) {
+      taxData = d; taxSel = {}; renderTax();
+      var pa = taxPending; taxPending = null;
+      if (pa && pa.type === 'notice' && taxData.period) noticeDialog(pa.kind);
+      if (pa && pa.type === 'focus' && pa.ids && pa.ids.length) { taxAFocus = { label: pa.label, ids: pa.ids }; taxView = 'A'; try { localStorage.setItem('taxView', 'A'); } catch (e) { /* 略過 */ } renderTaxTable(); $('taxBox').scrollIntoView(); }
+    },
       function (err) { $('taxBox').textContent = err.message; });
   }
 

@@ -43,6 +43,18 @@
     .ovrow:last-child { border-bottom:none; }
     .ovrow .k { color:#667085; }
     .ovlink { font-size:12px; margin-top:8px; }
+    .hsec { font-size:15px; font-weight:700; color:var(--navy); margin:4px 0 10px; }
+    .todo-box { border-radius:8px; padding:10px 14px; margin-bottom:10px; }
+    .todo-box .ttl { font-weight:700; margin-bottom:4px; }
+    .todo-box .ln { font-size:13px; padding:2px 0; }
+    .todo-err { background:#fde2e2; border:1px solid #f4b4b4; } .todo-err .ttl, .todo-err .ln button { color:var(--danger); }
+    .todo-news { background:#e8f1fd; border:1px solid #a9c8f2; } .todo-news .ttl, .todo-news .ln button { color:#1f4f99; }
+    .todo-memo { background:#fff7d6; border:1px solid #ecd987; } .todo-memo .ttl { color:#8a6d00; }
+    .todo-grp { margin:10px 0 4px; font-size:13px; color:#667085; font-weight:700; }
+    .todo-cards { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:8px; margin-bottom:6px; }
+    .todo-cards .card { text-align:left; cursor:pointer; margin:0; padding:10px 12px; }
+    .todo-cards .n { font-size:22px; font-weight:700; color:var(--navy); }
+    .todo-cards .l { font-weight:600; font-size:13px; }
     nav .devtag { font-size:11px; color:#b54708; background:#fef0c7; border-radius:8px; padding:0 6px; margin-left:6px; font-weight:400; }
     main { flex:1; padding:24px; max-width:1100px; }
     h1 { font-size:20px; color:var(--navy); margin:0 0 16px; display:flex; align-items:center; gap:12px; }
@@ -197,6 +209,8 @@
         </section>
         <section id="page-home">
           <h1>首頁</h1>
+          <div id="homeTodo"></div>
+          <div class="hsec">系統狀態</div>
           <div class="grid">
             <div class="card stat click" id="statPending"><div class="label">待審核綁定申請</div><div class="value" id="statPendingValue">—</div><div class="muted">點此前往審核</div></div>
             <div class="card stat"><div class="label">今日背景處理用量</div><div class="value" id="statUsage">—</div><div class="muted" id="statUsageNote"></div></div>
@@ -410,10 +424,10 @@
 
   <div id="overlay" class="overlay hidden"><div class="modal" id="modal"></div></div>
 
-  <script src="bill-parser.js?v=0.41.1"></script>
+  <script src="bill-parser.js?v=0.42.0"></script>
   <script src="bank-parse.js?v=0.31.0"></script>
   <script src="bank-match.js?v=0.31.0"></script>
-  <script src="config.js?v=0.41.1"></script>
-  <script src="app.js?v=0.41.1"></script>
+  <script src="config.js?v=0.42.0"></script>
+  <script src="app.js?v=0.42.0"></script>
 </body>
 </html>
