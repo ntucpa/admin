@@ -1799,6 +1799,13 @@
     var ticked = {}, rowOf = {};
     d.todo.concat(d.sent).forEach(function (r) { rowOf[r.filingId] = r; });
     d.todo.forEach(function (r) { if (r.ticked) ticked[r.filingId] = 1; });
+    // 一家公司有多張請款單時，每張各有勾選（一起勾＝合併成一則；只勾一張＝只發那一張）
+    var billSel = {};
+    d.todo.concat(d.sent).forEach(function (r) { if (r.bills && r.bills.length > 1) { var o = {}; r.defaultBills.forEach(function (id) { o[id] = 1; }); billSel[r.filingId] = o; } });
+    function selIds(r) { var o = billSel[r.filingId]; return o ? r.bills.filter(function (b) { return o[b.billId]; }).map(function (b) { return b.billId; }) : null; }
+    function msgOf(r) { var ids = selIds(r); if (ids && r.messages && ids.length) { var k = ids.slice().sort().join('+'); if (r.messages[k]) return r.messages[k]; } return { message: r.message, lineMessage: r.lineMessage, amount: r.amount }; }
+    function noBillPicked() { return Object.keys(ticked).some(function (id) { var x = selIds(rowOf[id]); return x && !x.length; }); }
+    function billIdsOf(id) { var x = selIds(rowOf[id]); return x ? { billIds: x } : {}; }
 
     var tabs = el('div', { class: 'toolbar' });
     NOTICE_TABS.forEach(function (t) {
@@ -1832,7 +1839,7 @@
     var recState = {};
     d.todo.concat(d.sent).forEach(function (r) { var sel = {}; r.boundList.forEach(function (u) { sel[u.userId] = u.selected; }); recState[r.filingId] = { sel: sel, nm: {} }; });
     function recOf(r) { var st = recState[r.filingId]; return r.boundList.filter(function (u) { return st.sel[u.userId]; }).map(function (u) { return { u: u.userId, name: u.name, m: st.nm[u.userId] ? 0 : 1 }; }); }
-    function lineIds() { return Object.keys(ticked).filter(function (id) { var r = rowOf[id]; return recOf(r).length > 0 && !(r.queue && (r.queue.status === 'QUEUED' || r.queue.status === 'SENDING')); }); }
+    function lineIds() { return Object.keys(ticked).filter(function (id) { var r = rowOf[id]; var sb = selIds(r); return !(sb && !sb.length) && recOf(r).length > 0 && !(r.queue && (r.queue.status === 'QUEUED' || r.queue.status === 'SENDING')); }); }
     /** 合併摘要：同一位收件人名下勾選了多家 → 合併為一則（每 12 家一則）；回傳 { people, messages, lines } */
     function mergePlan() {
       var per = {}, singles = 0, people = 0;
@@ -1845,7 +1852,9 @@
       var n = Object.keys(ticked).length, ln = lineIds().length;
       count.textContent = '已勾選 ' + n + ' 家（可 LINE 發送 ' + ln + ' 家）';
       var mp = mergePlan(); mergeBox.textContent = mp.lines.length ? ('合併發送：' + mp.lines.join('；') + '（LINE 約用 ' + mp.messages + ' 則）') : '';
-      mark.disabled = !n || !d.canWrite; sendBtn.disabled = !ln || !d.canWrite || !d.sendEnabled;
+      var nb = noBillPicked();
+      mark.disabled = !n || !d.canWrite || nb; sendBtn.disabled = !ln || !d.canWrite || !d.sendEnabled || nb;
+      mark.title = nb ? '有公司沒有勾選任何一張請款單' : '';
     }
     var mergeBox = el('div', { class: 'muted', style: 'margin:4px 0;color:#1f4f99' });
     var mark = el('button', { class: 'btn secondary' }, '標記已手動傳送');
@@ -1858,10 +1867,11 @@
       var cb = el('input', { type: 'checkbox' }); cb.checked = !!ticked[r.filingId]; cb.disabled = !d.canWrite;
       cb.onchange = function () { if (cb.checked) ticked[r.filingId] = 1; else delete ticked[r.filingId]; updateCount(); };
       var info = [];
-      if (r.amount != null) info.push('合計 ' + String(r.amount).replace(/\B(?=(\d{3})+(?!\d))/g, ','));
-      if (isSent && r.sentAt) info.push('已發 ' + r.sentAt.slice(5));
+      var amtSpan = el('span', {});
+      function paintAmt() { var a = msgOf(r).amount; amtSpan.textContent = (a != null ? '合計 ' + String(a).replace(/\B(?=(\d{3})+(?!\d))/g, ',') : '') + (isSent && r.sentAt ? '　已發 ' + r.sentAt.slice(5) : ''); }
+      paintAmt();
       top.appendChild(cb); top.appendChild(el('strong', { style: 'min-width:90px' }, r.name)); top.appendChild(el('span', { class: 'muted' }, r.companyId));
-      if (info.length) top.appendChild(el('span', {}, info.join('　')));
+      top.appendChild(amtSpan);
       if (r.amountChanged) top.appendChild(el('span', { class: 'badge warn' }, '金額已變動：原 ' + r.amountChanged.from + '→' + r.amountChanged.to));
       if (r.anomaly) top.appendChild(el('span', { class: 'badge err' }, r.anomaly));
       var who = el('span', { class: 'badge off' });
@@ -1910,16 +1920,34 @@
       }
       var sp = el('span', { style: 'flex:1' }); top.appendChild(sp);
       var pv = el('button', { class: 'linkbtn' }, '預覽'), cp = el('button', { class: 'btn small secondary' }, '複製訊息');
-      var msg = el('div', { style: 'display:none;white-space:pre-wrap;background:#f6f8fb;border-radius:6px;padding:8px;margin:6px 0 0 26px;font-size:13px' }, r.boundList.length ? ('【LINE 版（下方會有按鈕）】' + String.fromCharCode(10) + r.lineMessage + String.fromCharCode(10) + String.fromCharCode(10) + '【手動複製版】' + String.fromCharCode(10) + r.message) : r.message);
+      var msg = el('div', { style: 'display:none;white-space:pre-wrap;background:#f6f8fb;border-radius:6px;padding:8px;margin:6px 0 0 26px;font-size:13px' });
+      function paintMsg() { var mo = msgOf(r); msg.textContent = r.boundList.length ? ('【LINE 版（下方會有按鈕）】' + String.fromCharCode(10) + mo.lineMessage + String.fromCharCode(10) + String.fromCharCode(10) + '【手動複製版】' + String.fromCharCode(10) + mo.message) : mo.message; paintAmt(); }
+      paintMsg();
       pv.onclick = function () { msg.style.display = msg.style.display === 'none' ? 'block' : 'none'; };
       cp.onclick = function () {
-        copyText(r.message, function (ok) {
+        copyText(msgOf(r).message, function (ok) {
           tip.textContent = ok ? '已複製，貼到客戶 LINE 傳送後再按下方「標記已手動傳送」' : '複製失敗，請按「預覽」手動選取文字';
           if (ok && d.canWrite) { ticked[r.filingId] = 1; cb.checked = true; updateCount(); } // 複製後預選；沒按「標記」不會記錄
         });
       };
       top.appendChild(pv); top.appendChild(cp); top.appendChild(tip);
-      line.appendChild(top); line.appendChild(msg); parent.appendChild(line);
+      line.appendChild(top);
+      if (r.bills && r.bills.length > 1) {
+        var bb = el('div', { style: 'margin:4px 0 0 26px;font-size:13px;padding:6px 8px;background:#fbf8ef;border-radius:6px' });
+        bb.appendChild(el('div', { class: 'muted', style: 'margin-bottom:2px' }, '這家有 ' + r.bills.length + ' 張請款單：一起勾＝合併成一則訊息（一顆「我已匯款」按鈕代表全部）；只勾一張＝只發那一張，另一張之後再發會是獨立一則。'));
+        r.bills.forEach(function (b) {
+          var ln = el('label', { style: 'display:block;padding:1px 0' }), c = el('input', { type: 'checkbox' });
+          c.checked = !!billSel[r.filingId][b.billId]; c.disabled = !d.canWrite;
+          c.onchange = function () { if (c.checked) billSel[r.filingId][b.billId] = 1; else delete billSel[r.filingId][b.billId]; paintMsg(); updateCount(); };
+          ln.appendChild(c);
+          ln.appendChild(document.createTextNode(' ' + b.kindLabel + '　' + String(b.amount).replace(/\B(?=(\d{3})+(?!\d))/g, ',') + ' 元（' + b.items.map(function (i) { return i.label; }).join('、') + '）'));
+          if (b.sentAt && !b.todo) ln.appendChild(el('span', { class: 'muted' }, '　已發 ' + b.sentAt.slice(5)));
+          else if (b.changed) ln.appendChild(el('span', { class: 'badge warn' }, '金額已變動'));
+          bb.appendChild(ln);
+        });
+        line.appendChild(bb);
+      }
+      line.appendChild(msg); parent.appendChild(line);
     }
 
     var cardTodo = el('div', { class: 'card', style: 'margin-bottom:8px' });
@@ -1944,7 +1972,7 @@
       mark.disabled = true; msgBox.textContent = '處理中…';
       call('tax.markNotified', {
         kind: d.kind, paymentDeadline: dueInput ? dueInput.value : undefined,
-        items: ids.map(function (id) { return { filingId: id, updatedAt: rowOf[id].updatedAt }; })
+        items: ids.map(function (id) { return Object.assign({ filingId: id, updatedAt: rowOf[id].updatedAt }, billIdsOf(id)); })
       }, function (res) {
         var bad = res.results.filter(function (x) { return !x.ok; });
         if (bad.length) alert(bad.length + ' 家沒有完成：' + bad[0].message + '\n（其餘已記錄；畫面會重新載入）');
@@ -1966,7 +1994,7 @@
         msgBox.textContent = '送出中…';
         call('tax.sendNotices', {
           kind: d.kind, paymentDeadline: dueInput ? dueInput.value : undefined,
-          items: ids.map(function (id) { return { filingId: id, updatedAt: rowOf[id].updatedAt, recipients: recOf(rowOf[id]).map(function (x) { return { u: x.u, m: x.m }; }) }; })
+          items: ids.map(function (id) { return Object.assign({ filingId: id, updatedAt: rowOf[id].updatedAt, recipients: recOf(rowOf[id]).map(function (x) { return { u: x.u, m: x.m }; }) }, billIdsOf(id)); })
         }, function (res) {
           var bad = res.results.filter(function (x) { return !x.ok; });
           if (bad.length) alert(bad.length + ' 家沒有排入發送：' + bad[0].message);
