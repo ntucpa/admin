@@ -3823,10 +3823,10 @@
         if (c.items && c.items.length) {
           var hasAdv = !!(c.advances && c.advances.length) && u.state !== 'done';
           var det = el('details', hasAdv ? { open: 'open', style: 'margin-top:4px' } : { style: 'margin-top:4px' }); det.appendChild(el('summary', { class: 'muted' }, '項目明細（' + c.items.length + ' 項）'));
-          if (hasAdv) det.appendChild(el('div', { class: 'alert', style: 'margin:4px 0' }, '這家客戶有 ' + c.advances.length + ' 筆未收回的代墊，請確認有沒有要併入這張請款單補收；要補收的項目在右邊選「補收代墊」。'));
+          if (hasAdv) det.appendChild(el('div', { class: 'alert', style: 'margin:4px 0' }, '這家客戶有 ' + c.advances.length + ' 筆未收回的代墊，請確認有沒有要併入這張請款單補收；要補收的項目請用項目下方的選單選「補收代墊」。'));
           c.items.forEach(function (i) {
             var line = el('div', { class: 'muted', style: 'margin:2px 0' }, i.label + '：' + fmtMoney(i.amount) + '　→ ' + i.categoryLabel + (i.periodKey ? '（' + i.periodKey + '）' : ''));
-            if (hasAdv) {
+            if (hasAdv && i.category !== 'BOOKKEEPING') {
               var sel = el('select', { style: 'width:auto;max-width:100%;margin-left:6px' }); sel.disabled = upBusy;
               sel.appendChild(el('option', { value: '' }, '一般項目'));
               c.advances.forEach(function (a) { sel.appendChild(el('option', { value: a.advanceId }, advOptionText(a))); });
