@@ -2573,7 +2573,7 @@
   function upReady(u) {
     if (!u.check || u.state === 'done') return false;
     if (upHard(u).length) return false;
-    if (upNeedReplace(u) && !u.replace) return false;
+    if (upNeedReplace(u) && !u.replace && !u.coexist) return false;
     if (upNeedReason(u) && (u.reason || '').trim().length < 2) return false;
     return true;
   }
@@ -2587,7 +2587,7 @@
       p = p.then(function () {
         $('upProgress').textContent = '讀取 PDF（' + (i + 1) + '／' + files.length + '）…';
         return readPdfFile(f).then(function (r) {
-          var u = { file: f, name: f.name, hash: r.hash, buf: r.buf, parse: r.parse, include: true, replace: false, reason: '', state: '', check: null };
+          var u = { file: f, name: f.name, hash: r.hash, buf: r.buf, parse: r.parse, include: true, replace: false, coexist: false, reason: '', state: '', check: null };
           added.push(u); ups.push(u);
         }, function () {
           var u = { file: f, name: f.name, hash: '', buf: null, parse: { ok: false, message: '無法讀取這個 PDF（檔案損毀或有密碼）' }, include: false, state: '', check: null };
@@ -2637,12 +2637,16 @@
       var note = el('td');
       if (u.msg) note.appendChild(el('div', { class: u.state === 'done' ? 'msg ok' : 'msg err' }, u.msg));
       if (c) {
+        if (c.kind && c.kind !== 'GENERAL') note.appendChild(el('div', { class: 'muted' }, '請款類別：' + ({ PREPAY: '暫繳', CIT: '營所稅', PIT: '綜所稅', UNDIST: '未分配盈餘稅' }[c.kind] || c.kind) + '（與營業稅請款單分開，各自期限與對帳）'));
         (c.errors || []).forEach(function (e) { note.appendChild(el('div', { class: 'msg err' }, '✖ ' + e.message)); });
         (c.warnings || []).concat(u.parse.warnings || []).forEach(function (w) { note.appendChild(el('div', { class: 'muted' }, '⚠ ' + w)); });
         if (u.state !== 'done' && !upHard(u).length && upNeedReplace(u)) {
           var lab = el('label', { style: 'display:block;margin-top:4px' }), rc = el('input', { type: 'checkbox' }); rc.checked = !!u.replace;
-          rc.onchange = function () { u.replace = rc.checked; if (u.replace) u.include = true; updateUpButtons(); };
-          lab.appendChild(rc); lab.appendChild(document.createTextNode(' 取代原有請款單' + (c.existingSent ? '（原單已發送，取代後新單需重新發送）' : ''))); note.appendChild(lab);
+          var lab2 = el('label', { style: 'display:block;margin-top:4px' }), rc2 = el('input', { type: 'checkbox' }); rc2.checked = !!u.coexist;
+          rc.onchange = function () { u.replace = rc.checked; if (u.replace) { u.include = true; u.coexist = false; rc2.checked = false; } updateUpButtons(); };
+          rc2.onchange = function () { u.coexist = rc2.checked; if (u.coexist) { u.include = true; u.replace = false; rc.checked = false; } updateUpButtons(); };
+          lab.appendChild(rc); lab.appendChild(document.createTextNode(' 取代原有請款單（同類別；原單已收的款會一併帶到新單）' + (c.existingSent ? '（原單已發送，取代後新單需重新發送）' : ''))); note.appendChild(lab);
+          lab2.appendChild(rc2); lab2.appendChild(document.createTextNode(' 並存（原單保留，另外新增一張）')); note.appendChild(lab2);
         }
         if (u.state !== 'done' && !upHard(u).length && upNeedReason(u)) {
           var ri = el('input', { type: 'text', placeholder: '確認無誤仍要匯入：請填原因（會留紀錄）', style: 'margin-top:4px' }); ri.value = u.reason || '';
@@ -2678,7 +2682,7 @@
       var u = list[i++]; $('upProgress').textContent = '匯入 ' + i + '／' + list.length + '：' + u.name;
       var c = u.check, b = u.parse.bill, short = (c.folderName || '').slice(b.taxId.length + 1);
       call('tax.storeFile', { companyId: b.taxId, storedName: c.storedName, shortName: short, contentBase64: toBase64(u.buf) }, function (s) {
-        call('tax.importBill', { fileName: u.name, parsed: b, receipt: s.receipt, storedName: c.storedName, replace: !!u.replace, override: u.reason && upNeedReason(u) ? { reason: u.reason.trim() } : undefined }, function (r) {
+        call('tax.importBill', { fileName: u.name, parsed: b, receipt: s.receipt, storedName: c.storedName, replace: !!u.replace, coexist: !!u.coexist, override: u.reason && upNeedReason(u) ? { reason: u.reason.trim() } : undefined }, function (r) {
           u.state = 'done'; u.msg = '已匯入' + (r.linkedPeriods ? '，稅額已帶入 ' + r.linkedPeriods + ' 個期別的檢核列' : '') + (r.needsResend ? '（原單已發送，新單需重新發送）' : ''); u.include = false; ok++; renderUploads(); next();
         }, function (e) { u.state = 'failed'; u.msg = e.message + '（檔案已存入雲端硬碟，可重新檢查後再匯入，不會重複存檔）'; fail++; renderUploads(); next(); });
       }, function (e) { u.state = 'failed'; u.msg = e.message; fail++; renderUploads(); next(); });
