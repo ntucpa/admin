@@ -247,6 +247,7 @@
     $('who').textContent = me.name + '（' + (me.role === 'SUPER_ADMIN' ? '超級管理員' : '管理員') + '）';
     document.querySelectorAll('.super-only').forEach(function (n) { n.classList.toggle('hidden', me.role !== 'SUPER_ADMIN'); });
     document.querySelectorAll('nav a[data-feature]').forEach(function (n) { n.classList.toggle('hidden', !n.getAttribute('data-feature').split('|').some(function (f) { return (me.features || []).indexOf(f) >= 0; })); });
+    navGroupsRefresh();
     renderHome(home);
     refreshMemoBadge();
   }
@@ -345,9 +346,18 @@
   }
 
   function go(page) {
+    // 發票辨識：開公司電腦上的入口頁（另開分頁）；還沒設定網址時顯示說明
+    if (page === 'invoiceai') {
+      var url = (window.YC_CONFIG || {}).INVOICE_AI_URL;
+      if (url) { window.open(url, '_blank', 'noopener'); return; }
+      showDevPage('發票辨識', '發票辨識的入口頁將放在公司電腦（進項、銷項等多支辨識程式從這裡進入），只有在公司網路或遠端連線時打得開。入口頁設定好後，點這裡會直接開啟。');
+    }
+    if (DEV_PAGES[page]) showDevPage(DEV_PAGES[page].title, DEV_PAGES[page].text);
+    var section = (page === 'invoiceai' || DEV_PAGES[page]) ? 'dev' : page;
     var navPage = (page === 'taxup' || page === 'taxsettings') ? 'tax' : page;
+    navExpandFor(navPage);
     document.querySelectorAll('nav a[data-page]').forEach(function (a) { a.classList.toggle('active', a.getAttribute('data-page') === navPage); });
-    document.querySelectorAll('main section').forEach(function (s) { s.classList.toggle('hidden', s.id !== 'page-' + page); });
+    document.querySelectorAll('main section').forEach(function (s) { s.classList.toggle('hidden', s.id !== 'page-' + section); });
     document.querySelector('main').style.maxWidth = (page === 'tax' || page === 'taxup' || page === 'taxsettings' || page === 'bank') ? 'none' : '';
     if (page === 'taxup') loadUploadPage();
     if (page === 'taxsettings') loadTaxSettings();
@@ -465,7 +475,7 @@
         if (b.otherCompanies.length) c1.appendChild(el('div', { class: 'muted' }, '已綁定：' + b.otherCompanies.join('、')));
         tr.appendChild(c1);
         var c2 = el('td'); c2.appendChild(el('div', {}, b.companyName)); c2.appendChild(el('div', { class: 'muted' }, b.companyId));
-        if (b.companyIssue) { c2.appendChild(badge(b.companyIssue, 'err')); c2.appendChild(el('div', { class: 'muted' }, '請先到「公司管理」完成設定才能核准')); }
+        if (b.companyIssue) { c2.appendChild(badge(b.companyIssue, 'err')); c2.appendChild(el('div', { class: 'muted' }, '請先到「客戶公司」完成設定才能核准')); }
         tr.appendChild(c2);
         tr.appendChild(el('td', {}, b.googleEmail));
         var c4 = el('td'); c4.appendChild(badge(SOURCE_LABEL[b.source] || b.source)); tr.appendChild(c4);
@@ -1622,6 +1632,49 @@
   $('logoutBtn').onclick = function () {
     api('logout', {}).then(null, function () {}).then(function () { showLogin('', '您已登出。'); });
   };
+
+  /* ---------- 選單：分組收合、開發中頁面、發票辨識入口 ---------- */
+  var DEV_PAGES = {
+    'dev-cit': { title: '營所稅／綜所稅', text: '營利事業所得稅與綜合所得稅的申報進度追蹤。營業稅穩定後依序開發。' },
+    'dev-wht': { title: '各類所得扣繳', text: '各類所得扣繳申報的進度追蹤。營業稅穩定後依序開發。' },
+    'dev-nhi': { title: '補充健保費', text: '補充保險費申報的進度追蹤。營業稅穩定後依序開發。' },
+    'dev-shareholder': { title: '公司股東資訊申報', text: '依公司法第 22 條之 1 向經濟部申報的公司負責人及股東資訊。營業稅穩定後依序開發。' }
+  };
+  function showDevPage(title, text) {
+    $('devTitle').textContent = title;
+    var box = $('devBox'); box.innerHTML = '';
+    var top = el('div', { style: 'margin-bottom:6px' }); top.appendChild(badge('開發中', 'warn')); box.appendChild(top);
+    box.appendChild(el('div', {}, text));
+  }
+  var NAV_GRP_KEY = 'yc_nav_collapsed';
+  function navCollapsedGet() { try { return JSON.parse(localStorage.getItem(NAV_GRP_KEY) || '{}') || {}; } catch (e) { return {}; } }
+  function navCollapsedSet(m) { try { localStorage.setItem(NAV_GRP_KEY, JSON.stringify(m)); } catch (e) { /* 無痕視窗等：不記住也沒關係 */ } }
+  /** 依角色與權限隱藏整組（組內全部項目都看不到時，連組名一起隱藏）；套用上次收合狀態 */
+  function navGroupsRefresh() {
+    var m = navCollapsedGet();
+    document.querySelectorAll('nav .grp').forEach(function (g) {
+      var any = Array.prototype.some.call(g.querySelectorAll('a[data-page]'), function (a) { return !a.classList.contains('hidden'); });
+      if (!any) g.classList.add('hidden');
+      g.classList.toggle('collapsed', !!m[g.getAttribute('data-grp')]);
+    });
+  }
+  function navExpandFor(page) {
+    var a = document.querySelector('nav a[data-page="' + page + '"]');
+    var g = a && a.closest('.grp');
+    if (g && g.classList.contains('collapsed')) {
+      g.classList.remove('collapsed');
+      var m = navCollapsedGet(); delete m[g.getAttribute('data-grp')]; navCollapsedSet(m);
+    }
+  }
+  document.querySelectorAll('nav .grp .sec').forEach(function (sec) {
+    var toggle = function () {
+      var g = sec.parentNode; g.classList.toggle('collapsed');
+      var m = navCollapsedGet(); if (g.classList.contains('collapsed')) m[g.getAttribute('data-grp')] = 1; else delete m[g.getAttribute('data-grp')]; navCollapsedSet(m);
+    };
+    sec.onclick = toggle;
+    sec.onkeydown = function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } };
+  });
+
   function closeMenu() { $('nav').classList.remove('open'); $('navMask').classList.remove('open'); }
   $('menuBtn').onclick = function () { $('nav').classList.add('open'); $('navMask').classList.add('open'); };
   $('navMask').onclick = closeMenu;

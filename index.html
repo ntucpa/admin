@@ -19,7 +19,16 @@
     nav a { display:block; padding:10px 20px; color:var(--slate); text-decoration:none; cursor:pointer; }
     nav a.active { background:#e8eef5; color:var(--navy); font-weight:700; border-left:3px solid var(--navy); padding-left:17px; }
     nav a.disabled { color:#b0b8c3; cursor:default; }
-    nav .sec { font-size:11px; color:#98a2b3; padding:14px 20px 4px; }
+    nav .sec { font-size:12px; color:#667085; padding:14px 20px 4px; cursor:pointer; user-select:none; display:flex; align-items:center; justify-content:space-between; font-weight:700; letter-spacing:.5px; }
+    nav .sec:hover { color:var(--navy); }
+    nav .sec .chev::after { content:'▾'; font-size:11px; color:#98a2b3; }
+    nav .grp.collapsed .sec .chev::after { content:'▸'; }
+    nav .grp.collapsed a { display:none; }
+    nav .grp a { padding:8px 20px 8px 28px; }
+    nav .grp a.active { padding-left:25px; }
+    nav .grp a.sub2 { padding-left:44px; font-size:13px; }
+    nav .grp a.sub2.active { padding-left:41px; }
+    nav .devtag { font-size:11px; color:#b54708; background:#fef0c7; border-radius:8px; padding:0 6px; margin-left:6px; font-weight:400; }
     main { flex:1; padding:24px; max-width:1100px; }
     h1 { font-size:20px; color:var(--navy); margin:0 0 16px; display:flex; align-items:center; gap:12px; }
     h1 .btn { font-size:14px; }
@@ -124,26 +133,45 @@
       <div id="navMask"></div>
       <nav id="nav">
         <a data-page="home" class="active">首頁</a>
-        <div class="sec">業務</div>
-        <a data-page="companies">公司管理</a>
-        <a data-page="bindings" data-feature="BINDING_APPROVAL">客戶綁定審核<span class="navcount" id="navPending"></span></a>
-        <a data-page="customers">客戶管理</a>
-        <a data-page="invites" data-feature="INVITE_MANAGEMENT">邀請管理</a>
-        <a data-page="tax" data-feature="TAX_CHECKLIST">稅務申報</a>
-        <a data-page="bank" data-feature="BANK_RECONCILIATION|TAX_CHECKLIST">收款對帳</a>
-        <a data-page="unclassified">未分類提醒<span class="navcount" id="navUnc"></span></a>
-        <a data-page="intake" class="super-only">客戶上傳文件<span class="navcount" id="navIntake"></span></a>
-        <a data-page="exceptions" data-feature="EXCEPTION_HANDLING">異常處理<span class="navcount" id="navExc"></span></a>
-        <div class="sec super-only">系統</div>
-        <a data-page="admins" class="super-only">管理員管理</a>
-        <a data-page="takeover" class="super-only">非事務所擁有的檔案</a>
-        <a data-page="driveaudit" class="super-only">雲端硬碟檢查</a>
-        <a data-page="companyimport" class="super-only">批次匯入公司</a>
-        <a data-page="backup" class="super-only">備份<span class="navcount" id="navBackup"></span></a>
-        <a data-page="audit" class="super-only">稽核紀錄</a>
-        <a data-page="settings" class="super-only">系統設定</a>
+        <div class="grp" data-grp="tax">
+          <div class="sec" role="button" tabindex="0">稅務申報<span class="chev"></span></div>
+          <a data-page="tax" data-feature="TAX_CHECKLIST">營業稅</a>
+          <a data-page="invoiceai" data-feature="TAX_CHECKLIST" class="sub2" title="開啟公司電腦上的發票辨識入口（需在公司網路或遠端連線）">發票辨識 ↗</a>
+          <a data-page="dev-cit" data-feature="TAX_CHECKLIST">營所稅／綜所稅<span class="devtag">開發中</span></a>
+          <a data-page="dev-wht" data-feature="TAX_CHECKLIST">各類所得扣繳<span class="devtag">開發中</span></a>
+          <a data-page="dev-nhi" data-feature="TAX_CHECKLIST">補充健保費<span class="devtag">開發中</span></a>
+          <a data-page="dev-shareholder" data-feature="TAX_CHECKLIST">公司股東資訊申報<span class="devtag">開發中</span></a>
+        </div>
+        <div class="grp" data-grp="bank">
+          <div class="sec" role="button" tabindex="0">收款對帳<span class="chev"></span></div>
+          <a data-page="bank" data-feature="BANK_RECONCILIATION|TAX_CHECKLIST">收款對帳</a>
+        </div>
+        <div class="grp" data-grp="customer">
+          <div class="sec" role="button" tabindex="0">客戶管理<span class="chev"></span></div>
+          <a data-page="companies">客戶公司</a>
+          <a data-page="customers">客戶聯絡人</a>
+          <a data-page="bindings" data-feature="BINDING_APPROVAL">綁定審核<span class="navcount" id="navPending"></span></a>
+          <a data-page="invites" data-feature="INVITE_MANAGEMENT">邀請連結</a>
+          <a data-page="intake" class="super-only">客戶上傳文件<span class="navcount" id="navIntake"></span></a>
+          <a data-page="unclassified">未分類提醒<span class="navcount" id="navUnc"></span></a>
+          <a data-page="exceptions" data-feature="EXCEPTION_HANDLING">異常處理<span class="navcount" id="navExc"></span></a>
+        </div>
+        <div class="grp super-only" data-grp="system">
+          <div class="sec" role="button" tabindex="0">系統管理<span class="chev"></span></div>
+          <a data-page="admins" class="super-only">管理員管理</a>
+          <a data-page="settings" class="super-only">系統設定（含 AI 設定）</a>
+          <a data-page="backup" class="super-only">備份<span class="navcount" id="navBackup"></span></a>
+          <a data-page="audit" class="super-only">稽核紀錄</a>
+          <a data-page="driveaudit" class="super-only">雲端硬碟檢查</a>
+          <a data-page="takeover" class="super-only">非事務所擁有的檔案</a>
+          <a data-page="companyimport" class="super-only">批次匯入公司</a>
+        </div>
       </nav>
       <main>
+        <section id="page-dev" class="hidden">
+          <h1 id="devTitle">開發中</h1>
+          <div class="card" id="devBox"></div>
+        </section>
         <section id="page-home">
           <h1>首頁</h1>
           <div class="grid">
@@ -159,7 +187,7 @@
         </section>
 
         <section id="page-companies" class="hidden">
-          <h1>公司管理 <button id="addCompanyBtn" class="btn hidden">＋ 新增公司</button></h1>
+          <h1>客戶公司 <button id="addCompanyBtn" class="btn hidden">＋ 新增公司</button></h1>
           <p class="muted">公司資料夾必須是系統帳號擁有的資料夾，且不可與其他公司資料夾或待分類資料夾重疊；設定後系統會自動關閉「編輯者可再分享」。</p>
           <div class="card"><div id="companyBox">載入中…</div></div>
         </section>
@@ -171,7 +199,7 @@
         </section>
 
         <section id="page-customers" class="hidden">
-          <h1>客戶管理</h1>
+          <h1>客戶聯絡人</h1>
           <div class="toolbar"><input type="text" id="custSearch" placeholder="搜尋客戶稱呼、LINE 名稱、公司或 Email"><span class="muted" id="custCount"></span></div>
           <div id="customerBox">載入中…</div>
         </section>
@@ -359,10 +387,10 @@
 
   <div id="overlay" class="overlay hidden"><div class="modal" id="modal"></div></div>
 
-  <script src="bill-parser.js?v=0.39.2"></script>
+  <script src="bill-parser.js?v=0.40.0"></script>
   <script src="bank-parse.js?v=0.31.0"></script>
   <script src="bank-match.js?v=0.31.0"></script>
-  <script src="config.js?v=0.39.2"></script>
-  <script src="app.js?v=0.39.2"></script>
+  <script src="config.js?v=0.40.0"></script>
+  <script src="app.js?v=0.40.0"></script>
 </body>
 </html>
