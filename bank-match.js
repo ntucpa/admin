@@ -53,17 +53,21 @@
   function matchPayments(txns, bills, companies, aliases, settings) {
     var s = Object.assign({}, DEFAULT_SETTINGS, settings || {});
     var R = buildResolver(companies, aliases);
+    // 工作用的請款單（不修改輸入）：amount＝目前剩餘待收。被「確認或建議」分配過的會扣掉，所以同一張請款單可被多筆交易分次分配
+    // （例如客戶先匯兩筆 30,000 湊不齊 94,466：兩筆都先建議為部分收款），但已收滿的不會再被分配。
+    var work = bills.map(function (b) { return { billId: b.billId, companyId: b.companyId, amount: b.amount, orig: b.amount }; });
+    var byId = {}; work.forEach(function (b) { byId[b.billId] = b; });
     var billsByCompany = {}, billsByAmount = {};
-    bills.forEach(function (b) {
+    work.forEach(function (b) {
       (billsByCompany[b.companyId] = billsByCompany[b.companyId] || []).push(b);
-      (billsByAmount[b.amount] = billsByAmount[b.amount] || []).push(b);
+      (billsByAmount[b.orig] = billsByAmount[b.orig] || []).push(b);
     });
-    var used = {}; // 本批已被「確認或建議」佔用之請款單，避免重複分配
     var resolved = txns.map(function (t) { return { t: t, p: R.resolve(t, s.nameMinChars) }; });
     var results = {};
-    function free(b) { return !used[b.billId]; }
+    function free(b) { return b.amount > 0; }
+    function take(allocs) { allocs.forEach(function (a) { byId[a.billId].amount -= a.allocated + a.fee; }); }
     function done(t, status, rule, known, allocs) {
-      allocs.forEach(function (a) { used[a.billId] = 1; });
+      take(allocs);
       results[t.id] = { txnId: t.id, status: status, rule: rule, known: known, allocations: allocs };
     }
     // 已知對照且唯一候選才自動確認（5.2：多候選一律建議）
@@ -95,14 +99,14 @@
           if (sub) hit = { b: cb[i], set: sub };
         }
         if (hit) {
-          var total = hit.set.reduce(function (a, x) { return a + x.amount; }, 0);
+          var total = hit.set.reduce(function (a, x) { return a + x.amount; }, 0), target = hit.b.amount;
           // 合計剛好等於請款單（沒有差匯費）、付款人已知且只對到一家公司 → 視同完全相符（預設打勾，仍需按「送出」；業主 2026-10-09 決定）；有差匯費或付款人靠名稱猜的仍是建議
-          var stC = hit.b.amount === total ? decide(p.known, single) : 'PROPOSED';
+          var stC = target === total ? decide(p.known, single) : 'PROPOSED';
           hit.set.forEach(function (x, idx) {
             var last = idx === hit.set.length - 1;
-            var alloc = [{ billId: hit.b.billId, companyId: hit.b.companyId, allocated: x.amount, fee: last ? hit.b.amount - total : 0 }];
+            var alloc = [{ billId: hit.b.billId, companyId: hit.b.companyId, allocated: x.amount, fee: last ? target - total : 0 }];
             if (x === t) done(t, stC, 'C', p.known, alloc);
-            else results[x.id] = { txnId: x.id, status: stC, rule: 'C', known: p.known, allocations: alloc };
+            else { take(alloc); results[x.id] = { txnId: x.id, status: stC, rule: 'C', known: p.known, allocations: alloc }; }
           });
           return;
         }
@@ -123,7 +127,7 @@
       }
       // E 只憑金額（付款人未知；全部請款單中恰一張金額相符）
       if (!cids.length) {
-        m = (billsByAmount[t.amount] || []).filter(free);
+        m = (billsByAmount[t.amount] || []).filter(function (b) { return b.amount === t.amount; });
         if (m.length === 1) { done(t, 'PROPOSED', 'E', false, [{ billId: m[0].billId, companyId: m[0].companyId, allocated: t.amount, fee: 0 }]); return; }
       }
       // F 金額不符：已知對照、候選公司恰有一張待收請款單（確認後該張成為部分收款或差額）

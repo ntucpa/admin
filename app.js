@@ -2156,7 +2156,7 @@
             call('bank.cancelMatch', { matchId: m.matchId }, function () { loadLedger(d.period); });
           };
           td.appendChild(c);
-          if (d.openBills && d.openBills.some(function (b) { return b.billId !== r.billId; })) { var ra = el('button', { class: 'linkbtn' }, '改分配'); ra.disabled = !d.canWrite; ra.style.marginLeft = '10px'; ra.onclick = function () { reassignDialog(r, m, d); }; td.appendChild(ra); }
+          if (d.openBills && d.openBills.some(function (b) { return b.billId !== r.billId; })) { var ra = el('button', { class: 'linkbtn' }, '合併其他客戶'); ra.disabled = !d.canWrite; ra.style.marginLeft = '10px'; ra.onclick = function () { reassignDialog(r, m, d); }; td.appendChild(ra); }
         } else td.appendChild(el('span', { class: 'muted' }, '需銀行對帳權限'));
         tr.appendChild(td); t.appendChild(tr);
       });
@@ -2167,15 +2167,16 @@
     var closed = r.status === 'RECONCILED' || r.status === 'RESOLVED';
     var reg = el('button', { class: 'btn small' }, '登記收款（現金／其他）'); reg.disabled = !d.canWrite || closed; reg.style.marginRight = '10px';
     reg.onclick = function () { registerDialog(r, d); }; acts.appendChild(reg);
+    if (rem > 0 && !closed) { var mi = el('button', { class: 'btn small secondary' }, '併入其他客戶多收的款'); mi.disabled = !d.canWrite; mi.style.marginRight = '10px'; mi.onclick = function () { mergeInDialog(r, d); }; acts.appendChild(mi); }
     if (rem !== 0 && !closed) { var rs = el('button', { class: 'btn small secondary' }, '處理差額'); rs.disabled = !d.canWrite; rs.onclick = function () { resolveDialog(r, d); }; acts.appendChild(rs); }
     if (r.diffResolution) { var ro = el('button', { class: 'btn small secondary' }, '撤銷差額處理'); ro.disabled = !d.canWrite; ro.style.marginLeft = '10px'; ro.onclick = function () { if (!confirm('撤銷後，請款單回到依實收金額計算的狀態。確定？')) return; call('bank.resolveDiff', { billId: r.billId, resolution: 'REOPEN' }, function () { loadLedger(d.period); }); }; acts.appendChild(ro); }
     box.appendChild(acts);
     return box;
   }
 
-  /** 改分配：把一筆已確認的收款的一部分，改分給其他公司／請款單（例：好日多收的 39,473 其實是三六五日的） */
+  /** 合併其他客戶：一筆已確認的收款其實也付了其他客戶的請款單，把其中一部分改分給它們（例：好日多收的 39,473 其實是三六五日的） */
   function reassignDialog(r, m, d) {
-    var dlg = openModal('改分配'); $('modal').style.width = 'min(800px,96vw)';
+    var dlg = openModal('合併其他客戶的請款單'); $('modal').style.width = 'min(800px,96vw)';
     var over = r.received + r.fee - r.total; // 這張多收的部分（有的話預設改出這麼多）
     dlg.appendChild(el('div', { class: 'muted' }, m.date + '　' + (METHOD_LABEL[m.method] || '') + '收款 ' + money(m.amount) + '　目前全部分給：' + r.companyId + ' ' + r.name + '（' + (KIND_LABEL[r.kind] || '') + '請款單，應收 ' + money(r.total) + '）'));
     var blocksBox = el('div'), blocks = [], info = el('div', { class: 'msg err' }), sumLine = el('div', { style: 'font-weight:600;margin:6px 0' });
@@ -2234,6 +2235,40 @@
     acts.appendChild(cancel); acts.appendChild(ok); dlg.appendChild(acts);
   }
 
+  /** 併入其他客戶多收的款：從同帳期其他請款單「多收」的收款，把需要的金額移到這張請款單（例：祝好生活店的 2,833 其實包在鑫富餘那筆 8,823 裡） */
+  function mergeInDialog(r, d) {
+    var dlg = openModal('併入其他客戶多收的款');
+    var rem = remaining(r), cands = [];
+    d.rows.forEach(function (x) {
+      var over = x.received + x.fee - x.total;
+      if (x.billId === r.billId || over <= 0) return;
+      x.matches.forEach(function (m) { if (m.canCancel) cands.push({ row: x, m: m, over: over, movable: Math.min(over, m.amount) }); });
+    });
+    dlg.appendChild(el('div', { class: 'muted' }, r.companyId + ' ' + r.name + '（' + (KIND_LABEL[r.kind] || '') + '請款單）還差 ' + money(rem) + '。這裡列出同一帳期其他客戶「多收」的收款，選一筆把需要的金額併進來。'));
+    if (!cands.length) {
+      dlg.appendChild(el('div', { class: 'alert', style: 'margin-top:8px' }, '目前沒有其他客戶多收的款項可以併入。若那筆款還沒在「銀行明細」對帳，請先到銀行明細用「指定客戶」，一筆款可以同時分給多家公司。'));
+      var c0 = el('button', { class: 'btn secondary' }, '關閉'); c0.onclick = closeModal; var a0 = el('div', { class: 'actions' }); a0.appendChild(c0); dlg.appendChild(a0); return;
+    }
+    var sel = el('select');
+    cands.forEach(function (c, i) { sel.appendChild(el('option', { value: String(i) }, c.row.companyId + ' ' + c.row.name + '　多收 ' + money(c.over) + '　（' + c.m.date + ' ' + (METHOD_LABEL[c.m.method] || '') + '收款 ' + money(c.m.amount) + '）')); });
+    var amount = el('input', { type: 'number', min: '1' });
+    function paintAmt() { var c = cands[Number(sel.value)]; amount.value = Math.min(rem, c.movable); }
+    sel.onchange = paintAmt; paintAmt();
+    var tag = el('input', { type: 'text', placeholder: '例如：鑫富餘祝好生活店（選填）' });
+    field(dlg, '從哪一筆併入', sel); field(dlg, '併入金額', amount); field(dlg, '把這個匯款標註也加到這家公司（下次自動認得，選填）', tag);
+    var msg = el('div', { class: 'msg err' }), acts = el('div', { class: 'actions' });
+    var cancel = el('button', { class: 'btn secondary' }, '取消'), ok = el('button', { class: 'btn' }, '併入');
+    cancel.onclick = closeModal;
+    ok.onclick = function () {
+      msg.textContent = '';
+      var c = cands[Number(sel.value)], a = Math.round(Number(amount.value) || 0);
+      if (a <= 0 || a > c.m.amount) { msg.textContent = '併入金額要大於 0，且不超過那筆收款的 ' + money(c.m.amount) + '。'; return; }
+      ok.disabled = true;
+      call('bank.reassignMatch', { matchId: c.m.matchId, moves: [{ billId: r.billId, amount: a }], learn: tag.value.trim() ? { tag: tag.value.trim(), accounts: [], names: [] } : undefined }, function () { closeModal(); loadLedger(d.period); }, function (e) { ok.disabled = false; msg.textContent = e.message; });
+    };
+    acts.appendChild(cancel); acts.appendChild(ok); dlg.appendChild(msg); dlg.appendChild(acts);
+  }
+
   function registerDialog(r, d) {
     var m = openModal('登記收款（不經銀行的收款）');
     m.appendChild(el('div', { class: 'muted' }, r.companyId + ' ' + r.name + '　' + (KIND_LABEL[r.kind] || '') + '請款單　應收 ' + money(r.total) + '，已收 ' + money(r.received + r.fee) + '，待收 ' + money(remaining(r))));
@@ -2265,8 +2300,8 @@
     var note = el('input', { type: 'text', placeholder: '備註（必填）' });
     field(m, '處理方式', sel); field(m, '備註', note);
     if (!under) {
-      var tr2 = el('button', { class: 'btn small secondary', style: 'margin-top:6px' }, '多收的其實是別家的？轉給其他請款單…');
-      tr2.onclick = function () { var cands = r.matches.filter(function (x) { return x.canCancel; }); closeModal(); if (!cands.length) { alert('這張請款單沒有可以改分配的收款（銀行入帳的改分配需要收款對帳權限）。'); return; } reassignDialog(r, cands.sort(function (a, b) { return b.amount - a.amount; })[0], d); };
+      var tr2 = el('button', { class: 'btn small secondary', style: 'margin-top:6px' }, '多收的其實是其他客戶的？合併其他客戶…');
+      tr2.onclick = function () { var cands = r.matches.filter(function (x) { return x.canCancel; }); closeModal(); if (!cands.length) { alert('這張請款單沒有可以合併其他客戶的收款（銀行入帳需要收款對帳權限）。'); return; } reassignDialog(r, cands.sort(function (a, b) { return b.amount - a.amount; })[0], d); };
       m.appendChild(tr2);
     }
     var msg = el('div', { class: 'msg err' }), acts = el('div', { class: 'actions' });
