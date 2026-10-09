@@ -30,6 +30,13 @@
     .muted { color:#667085; font-size:12px; }
     table { width:100%; border-collapse:collapse; table-layout:fixed; }
     th, td { text-align:left; padding:8px 6px; border-bottom:1px solid var(--line); vertical-align:top; word-break:break-word; }
+    table.auto { table-layout:auto; }
+    table.auto th, table.auto td { word-break:normal; }
+    .scrollx { overflow-x:auto; }
+    table.ledger { table-layout:auto; width:max-content; min-width:100%; font-size:13px; }
+    table.ledger th, table.ledger td { white-space:nowrap; word-break:normal; padding:8px 10px; }
+    table.ledger th.num, table.ledger td.num { text-align:right; font-variant-numeric:tabular-nums; }
+    table.ledger tr:nth-child(even) td { background:rgba(15,23,42,.02); }
     th { font-size:12px; color:#667085; font-weight:600; }
     input[type=text], textarea, select { width:100%; padding:6px 8px; border:1px solid #c9d2dc; border-radius:6px; font:inherit; background:#fff; }
     textarea { min-height:60px; font-family:Consolas,monospace; font-size:12px; }
@@ -350,10 +357,10 @@
 
   <div id="overlay" class="overlay hidden"><div class="modal" id="modal"></div></div>
 
-  <script src="bill-parser.js?v=0.33.0"></script>
+  <script src="bill-parser.js?v=0.33.1"></script>
   <script src="bank-parse.js?v=0.31.0"></script>
   <script src="bank-match.js?v=0.31.0"></script>
-  <script src="config.js?v=0.33.0"></script>
-  <script src="app.js?v=0.33.0"></script>
+  <script src="config.js?v=0.33.1"></script>
+  <script src="app.js?v=0.33.1"></script>
 </body>
 </html>

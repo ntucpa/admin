@@ -348,7 +348,7 @@
     var navPage = (page === 'taxup' || page === 'taxsettings') ? 'tax' : page;
     document.querySelectorAll('nav a[data-page]').forEach(function (a) { a.classList.toggle('active', a.getAttribute('data-page') === navPage); });
     document.querySelectorAll('main section').forEach(function (s) { s.classList.toggle('hidden', s.id !== 'page-' + page); });
-    document.querySelector('main').style.maxWidth = (page === 'tax' || page === 'taxup' || page === 'taxsettings') ? 'none' : '';
+    document.querySelector('main').style.maxWidth = (page === 'tax' || page === 'taxup' || page === 'taxsettings' || page === 'bank') ? 'none' : '';
     if (page === 'taxup') loadUploadPage();
     if (page === 'taxsettings') loadTaxSettings();
     if (page === 'tax') loadTax();
@@ -2109,18 +2109,18 @@
       var key = lg.q.trim().toLowerCase();
       var list = d.rows.filter(function (r) { return ledgerMatchFilter(r, lg.filter, d) && (!key || (r.companyId + ' ' + r.name).toLowerCase().indexOf(key) >= 0); });
       if (!list.length) { tbl.appendChild(el('div', { class: 'muted' }, d.rows.length ? '沒有符合的請款單。' : '這個帳期還沒有請款單。')); return; }
-      var t = el('table'), h = el('tr');
-      ['統編', '簡稱', '類別', '記帳費', '稅金', '其他', '應收', '付款期限', '客戶回報', '實收', '入帳日', '匯費', '差額', '狀態', ''].forEach(function (x) { h.appendChild(el('th', {}, x)); }); t.appendChild(h);
+      var t = el('table', { class: 'ledger' }), h = el('tr');
+      ['統編', '簡稱', '類別', '記帳費', '稅金', '其他', '應收', '付款期限', '客戶回報', '實收', '入帳日', '匯費', '差額', '狀態', ''].forEach(function (x, i) { h.appendChild(el('th', [3, 4, 5, 6, 9, 11, 12].indexOf(i) >= 0 ? { class: 'num' } : {}, x)); }); t.appendChild(h);
       var tot = { total: 0, received: 0, fee: 0, diff: 0 };
       list.forEach(function (r) {
         var st = ledgerStatus(r, d), tr = el('tr');
         tot.total += r.total; tot.received += r.received; tot.fee += r.fee; tot.diff += remaining(r);
         [r.companyId, r.name, KIND_LABEL[r.kind] || r.kind, money(r.bookkeeping), money(r.tax), money(r.other), money(r.total), r.dueDate ? r.dueDate.slice(5) : '', r.reportedAt ? r.reportedAt.slice(5) : '', money(r.received), r.receivedAt ? r.receivedAt.slice(5) : ''].forEach(function (x, i) {
-          tr.appendChild(el('td', i >= 3 && i <= 6 || i === 9 ? { style: 'text-align:right' } : {}, x));
+          tr.appendChild(el('td', i >= 3 && i <= 6 || i === 9 ? { class: 'num' } : {}, x));
         });
-        var feeTd = el('td', { style: 'text-align:right' }, r.fee ? String(r.fee) : ''); if (r.fee) feeTd.title = '匯費免收 ' + r.fee + ' 元（待收 − 入帳）';
+        var feeTd = el('td', { class: 'num' }, r.fee ? String(r.fee) : ''); if (r.fee) feeTd.title = '匯費免收 ' + r.fee + ' 元（待收 − 入帳）';
         tr.appendChild(feeTd);
-        tr.appendChild(el('td', { style: 'text-align:right' }, remaining(r) ? money(remaining(r)) : ''));
+        tr.appendChild(el('td', { class: 'num' }, remaining(r) ? money(remaining(r)) : ''));
         var sd = el('td'); sd.appendChild(badge(st.text, st.cls)); st.extra.forEach(function (x) { sd.appendChild(badge(x[0], x[1])); }); tr.appendChild(sd);
         var op = el('td'), ex = el('button', { class: 'linkbtn' }, lg.open[r.billId] ? '收合' : '展開');
         ex.onclick = function () { lg.open[r.billId] = !lg.open[r.billId]; paint(); };
@@ -2132,9 +2132,9 @@
       });
       var fr = el('tr', { style: 'font-weight:600' });
       fr.appendChild(el('td', { colspan: '6' }, '合計（' + list.length + ' 張）'));
-      [tot.total, '', '', tot.received, '', tot.fee, tot.diff].forEach(function (x, i) { fr.appendChild(el('td', { style: 'text-align:right' }, x === '' ? '' : money(x))); });
+      [tot.total, '', '', tot.received, '', tot.fee, tot.diff].forEach(function (x, i) { fr.appendChild(el('td', { class: 'num' }, x === '' ? '' : money(x))); });
       fr.appendChild(el('td', { colspan: '2' }, '')); t.appendChild(fr);
-      tbl.appendChild(t);
+      var sc = el('div', { class: 'scrollx' }); sc.appendChild(t); tbl.appendChild(sc);
     }
     paint();
   }
@@ -2144,7 +2144,7 @@
     box.appendChild(el('div', { style: 'font-weight:600;margin-bottom:4px' }, '已確認的收款'));
     if (!r.matches.length) box.appendChild(el('div', { class: 'muted' }, '還沒有已確認的收款。'));
     else {
-      var t = el('table'), h = el('tr'); ['入帳日', '方式', '金額', '匯費', '規則', '確認人', '備註', ''].forEach(function (x) { h.appendChild(el('th', {}, x)); }); t.appendChild(h);
+      var t = el('table', { class: 'auto' }), h = el('tr'); ['入帳日', '方式', '金額', '匯費', '規則', '確認人', '備註', ''].forEach(function (x) { h.appendChild(el('th', {}, x)); }); t.appendChild(h);
       r.matches.forEach(function (m) {
         var tr = el('tr');
         [m.date, METHOD_LABEL[m.method] || m.method, money(m.amount), m.fee ? String(m.fee) : '', RULE_LABEL[m.rule] || (m.rule === 'CASH' ? '手動登記' : m.rule), m.by, m.note || ''].forEach(function (x) { tr.appendChild(el('td', {}, x)); });
@@ -2360,7 +2360,7 @@
     var card = el('div', { class: 'card' }); box.appendChild(card);
     if (!list.length) card.appendChild(el('div', { class: 'muted' }, bs.tab === 'exact' ? '沒有完全相符的項目。' : '這一類沒有項目。'));
     else {
-      var t = el('table'), h = el('tr');
+      var t = el('table', { class: 'auto' }), h = el('tr');
       [(bs.tab === 'exact' || bs.tab === 'propose' || bs.tab === 'tax') ? '送出' : '', '日期', '金額', '付款人', '比對結果', ''].forEach(function (x) { h.appendChild(el('th', {}, x)); }); t.appendChild(h);
       list.forEach(function (r) { t.appendChild(rowTr(r)); });
       card.appendChild(t);
@@ -2438,7 +2438,7 @@
         var other = {}; blocks.forEach(function (b) { if (b !== blk) b.inputs.forEach(function (x) { other[x[0].billId] = 1; }); });
         var bills = bs.ctx.bills.filter(function (b) { return b.companyId === blk.comp.value && !used[b.billId] && !other[b.billId]; });
         if (!bills.length) { box.appendChild(el('div', { class: 'muted' }, '這家公司目前沒有待收的請款單。')); paintSum(); return; }
-        var t = el('table'), h = el('tr'); ['請款單', '待收', '分配金額'].forEach(function (x) { h.appendChild(el('th', {}, x)); }); t.appendChild(h);
+        var t = el('table', { class: 'auto' }), h = el('tr'); ['請款單', '待收', '分配金額'].forEach(function (x) { h.appendChild(el('th', {}, x)); }); t.appendChild(h);
         bills.forEach(function (b) {
           var tr = el('tr'); tr.appendChild(el('td', {}, billLabel(b.billId).replace(/（待收.*$/, ''))); tr.appendChild(el('td', {}, money(b.remaining)));
           var inp = el('input', { type: 'number', min: '0', style: 'width:120px' });
@@ -2504,7 +2504,7 @@
   function renderSug(body, d) {
     body.innerHTML = '';
     var pick = {};
-    var t = el('table'), h = el('tr'); ['加入', '標註', '次數', '對到公司'].forEach(function (x) { h.appendChild(el('th', {}, x)); }); t.appendChild(h);
+    var t = el('table', { class: 'auto' }), h = el('tr'); ['加入', '標註', '次數', '對到公司'].forEach(function (x) { h.appendChild(el('th', {}, x)); }); t.appendChild(h);
     d.groups.forEach(function (g) {
       var tr = el('tr'), td = el('td');
       var cell = el('td');
@@ -2591,7 +2591,7 @@
       call('bank.listRecent', {}, function (d) {
         body.innerHTML = '';
         if (!d.matches.length) { body.appendChild(el('div', { class: 'muted' }, '還沒有已確認的銀行對帳結果。')); return; }
-        var t = el('table'), h = el('tr'); ['入帳日', '公司', '對象', '入帳', '匯費', '規則', '確認人', ''].forEach(function (x) { h.appendChild(el('th', {}, x)); }); t.appendChild(h);
+        var t = el('table', { class: 'auto' }), h = el('tr'); ['入帳日', '公司', '對象', '入帳', '匯費', '規則', '確認人', ''].forEach(function (x) { h.appendChild(el('th', {}, x)); }); t.appendChild(h);
         d.matches.forEach(function (m) {
           var tr = el('tr');
           [m.txnDate, m.companyId + ' ' + m.companyName, m.targetType === 'BILL' ? '請款單' : '營業稅申報列（繳稅）', money(m.allocated), m.fee ? String(m.fee) : '', RULE_LABEL[m.rule] || m.rule, m.confirmedBy].forEach(function (x) { tr.appendChild(el('td', {}, x)); });
@@ -2679,7 +2679,7 @@
         return !q || (a.value + ' ' + a.companyName + ' ' + a.companyId).toLowerCase().indexOf(q) >= 0;
       });
       if (!list.length) { tbl.appendChild(el('div', { class: 'muted' }, d.aliases.length ? '沒有符合的資料。' : '還沒有任何匯款來源。上線前可由超級管理員按「建立匯款來源對照」用歷史明細一次建立；之後對帳時會自動學習。')); return; }
-      var t = el('table'), h = el('tr');
+      var t = el('table', { class: 'auto' }), h = el('tr');
       ['公司', '類型', '內容', '來源', '使用次數', '最後使用', '狀態', '操作'].forEach(function (x) { h.appendChild(el('th', {}, x)); }); t.appendChild(h);
       list.forEach(function (a) {
         var tr = el('tr');
@@ -2785,7 +2785,7 @@
     function tableFor(list, title, choose) {
       if (!list.length) return;
       body.appendChild(el('h3', { style: 'margin:10px 0 4px' }, title));
-      var t = el('table'), h = el('tr');
+      var t = el('table', { class: 'auto' }), h = el('tr');
       ['標註', '次數', '帳號／戶名', choose ? '對應公司' : '對到公司', ''].forEach(function (x) { h.appendChild(el('th', {}, x)); }); t.appendChild(h);
       list.forEach(function (g) {
         var tr = el('tr', g.suggest ? { style: 'background:#fff8e1' } : {});
