@@ -1649,31 +1649,28 @@
     var top = el('div', { style: 'margin-bottom:6px' }); top.appendChild(badge('開發中', 'warn')); box.appendChild(top);
     box.appendChild(el('div', {}, text));
   }
-  var NAV_GRP_KEY = 'yc_nav_collapsed';
-  function navCollapsedGet() { try { return JSON.parse(localStorage.getItem(NAV_GRP_KEY) || '{}') || {}; } catch (e) { return {}; } }
-  function navCollapsedSet(m) { try { localStorage.setItem(NAV_GRP_KEY, JSON.stringify(m)); } catch (e) { /* 無痕視窗等：不記住也沒關係 */ } }
-  /** 依角色與權限隱藏整組（組內全部項目都看不到時，連組名一起隱藏）；套用上次收合狀態 */
+  /**
+   * 依角色與權限隱藏整組（組內全部項目都看不到時，連組名一起隱藏）。
+   * 每次進入後台的預設（業主 2026-10-09）：只展開「稅務申報」，其他組收合；沒有稅務申報的人改展開「客戶管理」。
+   * 使用中可自行點組名收合／展開；切換到某一頁時，該頁所在的組會自動展開。不記住上次狀態。
+   */
   function navGroupsRefresh() {
-    var m = navCollapsedGet();
-    document.querySelectorAll('nav .grp').forEach(function (g) {
+    var groups = Array.prototype.slice.call(document.querySelectorAll('nav .grp'));
+    groups.forEach(function (g) {
       var any = Array.prototype.some.call(g.querySelectorAll('a[data-page]'), function (a) { return !a.classList.contains('hidden'); });
       if (!any) g.classList.add('hidden');
-      g.classList.toggle('collapsed', !!m[g.getAttribute('data-grp')]);
     });
+    var visible = groups.filter(function (g) { return !g.classList.contains('hidden'); });
+    var open = visible.filter(function (g) { return g.getAttribute('data-grp') === 'tax'; })[0] || visible.filter(function (g) { return g.getAttribute('data-grp') === 'customer'; })[0];
+    groups.forEach(function (g) { g.classList.toggle('collapsed', g !== open); });
   }
   function navExpandFor(page) {
     var a = document.querySelector('nav a[data-page="' + page + '"]');
     var g = a && a.closest('.grp');
-    if (g && g.classList.contains('collapsed')) {
-      g.classList.remove('collapsed');
-      var m = navCollapsedGet(); delete m[g.getAttribute('data-grp')]; navCollapsedSet(m);
-    }
+    if (g) g.classList.remove('collapsed');
   }
   document.querySelectorAll('nav .grp .sec').forEach(function (sec) {
-    var toggle = function () {
-      var g = sec.parentNode; g.classList.toggle('collapsed');
-      var m = navCollapsedGet(); if (g.classList.contains('collapsed')) m[g.getAttribute('data-grp')] = 1; else delete m[g.getAttribute('data-grp')]; navCollapsedSet(m);
-    };
+    var toggle = function () { sec.parentNode.classList.toggle('collapsed'); };
     sec.onclick = toggle;
     sec.onkeydown = function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } };
   });
