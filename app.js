@@ -2443,6 +2443,17 @@
     if (d.isSuper) {
       var boot = el('button', { class: 'btn small secondary' }, '建立匯款來源對照（上線前一次性）');
       boot.disabled = !d.canWrite; boot.onclick = bootstrapDialog; bar.appendChild(boot);
+      var clean = el('button', { class: 'btn small secondary' }, '清理序號型帳號');
+      clean.title = '舊版把銀行交易序號（10 碼數字）誤當成轉出帳號存進來；這裡一次清掉';
+      clean.disabled = !d.canWrite;
+      clean.onclick = function () {
+        call('bank.cleanupSerialAliases', {}, function (r) {
+          if (!r.count) { alert('沒有需要清理的序號型帳號。'); return; }
+          if (!confirm('找到 ' + r.count + ' 筆「10 碼數字」的轉出帳號（歷史匯入或對帳學習建立、從未使用）。\n這是銀行的交易序號，不是帳號，留著沒有用。\n\n範例：' + r.samples.map(function (s) { return s.companyId + ' ' + s.value; }).join('、') + '\n\n全部刪除？')) return;
+          call('bank.cleanupSerialAliases', { apply: true }, function (x) { alert('已刪除 ' + x.deleted + ' 筆。'); loadBank(); });
+        });
+      };
+      bar.appendChild(clean);
     }
     box.appendChild(bar);
     box.appendChild(el('div', { class: 'muted', style: 'margin-bottom:6px' }, '匯款來源＝「哪個帳號、戶名、標註屬於哪家公司」，對帳時用來自動認出付款人。同一個帳號可以對到多家公司（替多家公司付款）。'));
@@ -2477,7 +2488,13 @@
           if (a.status === 'ACTIVE' && !confirm('停用後對帳時不會再用這筆來認付款人（已確認的結果不受影響）。確定停用？')) return;
           call('bank.setAliasStatus', { aliasId: a.aliasId, status: a.status === 'ACTIVE' ? 'DISABLED' : 'ACTIVE' }, loadBank);
         };
-        op.appendChild(ed); op.appendChild(tg); tr.appendChild(op); t.appendChild(tr);
+        var del = el('button', { class: 'linkbtn', style: 'color:#b42318' }, '刪除'); del.disabled = !d.canWrite;
+        del.onclick = function () {
+          if (!confirm('刪除後無法復原（對帳時就不會再用它認付款人，已確認的對帳結果不受影響）。\n若只是暫時不用，請改按「停用」。\n\n確定刪除這筆？')) return;
+          call('bank.deleteAlias', { aliasId: a.aliasId }, loadBank);
+        };
+        [ed, tg, del].forEach(function (x) { x.style.marginRight = '14px'; op.appendChild(x); });
+        tr.appendChild(op); t.appendChild(tr);
       });
       tbl.appendChild(t);
       tbl.appendChild(el('div', { class: 'muted', style: 'margin-top:4px' }, '共 ' + list.length + ' 筆'));
@@ -2545,11 +2562,11 @@
     var sel = {}; // tag → 'ACCEPT'（接受自動對上）／'SKIP'／公司編號
     var auto = pv.groups.filter(function (g) { return g.status === 'AUTO'; }), todo = pv.groups.filter(function (g) { return g.status !== 'AUTO'; });
     var summary = el('div', { style: 'margin:8px 0;font-weight:600' });
-    function value(g) { return sel[g.tag] === undefined ? (g.status === 'AUTO' ? 'ACCEPT' : (g.defaultAction === 'SKIP' ? 'SKIP' : '')) : sel[g.tag]; }
+    function value(g) { return sel[g.tag] === undefined ? (g.status === 'AUTO' ? 'ACCEPT' : '') : sel[g.tag]; }
     function companyOf(g) { var v = value(g); return v === 'ACCEPT' ? g.candidates[0].companyId : (v && v !== 'SKIP' ? v : ''); }
     function paintSummary() {
-      var n = pv.groups.filter(function (g) { return companyOf(g); }).length, pending = todo.filter(function (g) { return value(g) === ''; }).length;
-      summary.textContent = '將建立 ' + n + ' 個標註的對照' + (pending ? '；還有 ' + pending + ' 個「待選擇」，不選就不建立' : '') + '。';
+      var n = pv.groups.filter(function (g) { return companyOf(g); }).length, skip = pv.groups.length - n, hot = pv.groups.filter(function (g) { return !companyOf(g) && g.suggest; }).length;
+      summary.textContent = '將建立 ' + n + ' 個標註的對照；略過 ' + skip + ' 個' + (hot ? '（其中 ' + hot + ' 個出現過多次，建議確認是不是客戶）' : '') + '。';
     }
     function tableFor(list, title, choose) {
       if (!list.length) return;
@@ -2557,9 +2574,9 @@
       var t = el('table'), h = el('tr');
       ['標註', '次數', '帳號／戶名', choose ? '對應公司' : '對到公司', ''].forEach(function (x) { h.appendChild(el('th', {}, x)); }); t.appendChild(h);
       list.forEach(function (g) {
-        var tr = el('tr');
+        var tr = el('tr', g.suggest ? { style: 'background:#fff8e1' } : {});
         tr.appendChild(el('td', {}, g.tag)); tr.appendChild(el('td', {}, String(g.count)));
-        tr.appendChild(el('td', { class: 'muted' }, (g.accounts.length ? g.accounts.length + ' 個帳號' : '無帳號') + (g.names.length ? '、' + g.names.slice(0, 2).join('／') + (g.names.length > 2 ? '…' : '') : '')));
+        tr.appendChild(el('td', { class: 'muted' }, (g.accounts.length ? g.accounts.length + ' 個帳號' : '無帳號') + (g.skippedAccounts ? '（另有 ' + g.skippedAccounts + ' 個只出現一次的不加入）' : '') + (g.names.length ? '、' + g.names.slice(0, 2).join('／') + (g.names.length > 2 ? '…' : '') : '')));
         var td = el('td'), td2 = el('td');
         if (!choose) {
           var cb = el('input', { type: 'checkbox' }); cb.checked = value(g) === 'ACCEPT';
@@ -2568,7 +2585,7 @@
           td2.appendChild(cb); td2.appendChild(document.createTextNode(' 加入')); if (g.alreadyHas) td2.appendChild(badge('已有', 'off'));
         } else {
           var s = el('select');
-          s.appendChild(el('option', { value: '' }, '— 請選擇 —')); s.appendChild(el('option', { value: 'SKIP' }, '略過（非客戶或不處理）'));
+          s.appendChild(el('option', { value: '' }, '略過（不建立）'));
           var cands = g.candidates.map(function (c) { return c.companyId; });
           if (g.candidates.length) { var og = el('optgroup', { label: '可能是' }); g.candidates.forEach(function (c) { og.appendChild(el('option', { value: c.companyId }, c.companyId + ' ' + c.name)); }); s.appendChild(og); }
           var og2 = el('optgroup', { label: '其他公司' });
@@ -2582,7 +2599,7 @@
       body.appendChild(t);
     }
     tableFor(auto, '自動對上（' + auto.length + '）— 勾選＝加入', false);
-    tableFor(todo, '要您選擇（' + todo.length + '）— 依出現次數排序，只出現 1 次的預設略過', true);
+    tableFor(todo, '沒有自動對上（' + todo.length + '）— 選一家公司就建立，不選就略過；出現多次的標黃色，建議確認', true);
     body.appendChild(summary);
     var msg = el('div', { class: 'msg err' }), go1 = el('button', { class: 'btn' }, '建立');
     go1.disabled = !pv.canWrite;

@@ -61,7 +61,7 @@
   /**
    * 解析備註（M2 4.1）。回傳 { payerAccount, payerName, freeText, payerTag, taxRefNo7, taxPayCategory }
    *  ATM 轉入「ATM 822-0000163540288782 自由文字 未歸類 標註」：帳號＝822-0000163540288782；自由文字不當戶名（常是備註，如「會計 0708」）
-   *  轉帳存入「戶名  分行  帳號 未歸類 標註」或「戶名 未歸類 標註」：戶名與（若有）帳號
+   *  轉帳存入「戶名  分行  交易序號 未歸類 標註」或「戶名 未歸類 標註」：只取戶名（序號不是帳號）
    *  轉帳存入「轉出0021090100204580 自由文字」：帳號＝0021090100204580
    *  繳費轉出「客戶銷帳編號:2501265 … 繳費類別:15252」
    */
@@ -83,7 +83,8 @@
     if (from) { out.payerAccount = from[1]; out.freeText = from[2].trim(); return out; }
     if (summary === '轉帳存入') {
       var named = /^(.+?)[\s　]{2,}(.+?)[\s　]{2,}(\d{6,})$/.exec(body);
-      if (named) { out.payerName = named[1].trim(); out.payerAccount = named[3]; return out; }
+      // 末段 10 碼數字是銀行的交易序號（實測 41 筆全不相同、隨時間遞增），不是轉出帳號：不當帳號存（業主 2026-10-09 指出）
+      if (named) { out.payerName = named[1].trim(); return out; }
       if (body && !/^\d+$/.test(body)) out.payerName = body;
     }
     return out;
