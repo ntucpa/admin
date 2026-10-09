@@ -2156,6 +2156,7 @@
             call('bank.cancelMatch', { matchId: m.matchId }, function () { loadLedger(d.period); });
           };
           td.appendChild(c);
+          if (d.openBills && d.openBills.some(function (b) { return b.billId !== r.billId; })) { var ra = el('button', { class: 'linkbtn' }, '改分配'); ra.disabled = !d.canWrite; ra.style.marginLeft = '10px'; ra.onclick = function () { reassignDialog(r, m, d); }; td.appendChild(ra); }
         } else td.appendChild(el('span', { class: 'muted' }, '需銀行對帳權限'));
         tr.appendChild(td); t.appendChild(tr);
       });
@@ -2170,6 +2171,67 @@
     if (r.diffResolution) { var ro = el('button', { class: 'btn small secondary' }, '撤銷差額處理'); ro.disabled = !d.canWrite; ro.style.marginLeft = '10px'; ro.onclick = function () { if (!confirm('撤銷後，請款單回到依實收金額計算的狀態。確定？')) return; call('bank.resolveDiff', { billId: r.billId, resolution: 'REOPEN' }, function () { loadLedger(d.period); }); }; acts.appendChild(ro); }
     box.appendChild(acts);
     return box;
+  }
+
+  /** 改分配：把一筆已確認的收款的一部分，改分給其他公司／請款單（例：好日多收的 39,473 其實是三六五日的） */
+  function reassignDialog(r, m, d) {
+    var dlg = openModal('改分配'); $('modal').style.width = 'min(800px,96vw)';
+    var over = r.received + r.fee - r.total; // 這張多收的部分（有的話預設改出這麼多）
+    dlg.appendChild(el('div', { class: 'muted' }, m.date + '　' + (METHOD_LABEL[m.method] || '') + '收款 ' + money(m.amount) + '　目前全部分給：' + r.companyId + ' ' + r.name + '（' + (KIND_LABEL[r.kind] || '') + '請款單，應收 ' + money(r.total) + '）'));
+    var blocksBox = el('div'), blocks = [], info = el('div', { class: 'msg err' }), sumLine = el('div', { style: 'font-weight:600;margin:6px 0' });
+    var movable = over > 0 ? Math.min(over, m.amount) : m.amount, left = movable;
+    var cos = {}; d.openBills.forEach(function (b) { if (b.billId !== r.billId) cos[b.companyId] = b.name; });
+    function paintSum() {
+      var sum = 0; blocks.forEach(function (b) { b.inputs.forEach(function (x) { sum += Math.round(Number(x[1].value) || 0); }); });
+      sumLine.textContent = '改分給其他請款單：' + money(sum) + '　→　留在原請款單：' + money(m.amount - sum) + (sum > m.amount ? '（超過這筆收款的金額）' : '');
+    }
+    function addBlock(companyId) {
+      var blk = { inputs: [], comp: el('select') }, card = el('div', { class: 'card', style: 'margin:8px 0' }), box = el('div');
+      blk.comp.appendChild(el('option', { value: '' }, '請選擇改分給的公司'));
+      Object.keys(cos).forEach(function (id) { blk.comp.appendChild(el('option', { value: id }, id + ' ' + cos[id])); });
+      blk.comp.value = companyId || '';
+      function paint() {
+        box.innerHTML = ''; blk.inputs = [];
+        if (!blk.comp.value) { paintSum(); return; }
+        var taken = {}; blocks.forEach(function (b) { if (b !== blk) b.inputs.forEach(function (x) { taken[x[0].billId] = 1; }); });
+        var bills = d.openBills.filter(function (b) { return b.companyId === blk.comp.value && b.billId !== r.billId && !taken[b.billId]; });
+        var t = el('table', { class: 'auto' }), h = el('tr'); ['請款單', '待收', '改分配金額'].forEach(function (x) { h.appendChild(el('th', {}, x)); }); t.appendChild(h);
+        bills.forEach(function (b) {
+          var tr = el('tr'); tr.appendChild(el('td', {}, (KIND_LABEL[b.kind] || '') + ' ' + b.billingPeriod)); tr.appendChild(el('td', {}, money(b.remaining)));
+          var inp = el('input', { type: 'number', min: '0', style: 'width:120px' }), pre = Math.min(left, b.remaining); left -= pre;
+          inp.value = pre > 0 ? pre : ''; inp.oninput = paintSum; var td = el('td'); td.appendChild(inp); tr.appendChild(td); t.appendChild(tr); blk.inputs.push([b, inp]);
+        });
+        box.appendChild(t); paintSum();
+      }
+      blk.comp.onchange = function () { left = movable; paint(); };
+      var top = el('div', { class: 'toolbar' }); top.appendChild(blk.comp);
+      var rm = el('button', { class: 'linkbtn' }, '移除這家'); rm.onclick = function () { blocks.splice(blocks.indexOf(blk), 1); card.remove(); paintSum(); };
+      if (blocks.length) top.appendChild(rm);
+      card.appendChild(top); card.appendChild(box); blocksBox.appendChild(card); blocks.push(blk); paint();
+    }
+    addBlock('');
+    dlg.appendChild(blocksBox);
+    var more = el('button', { class: 'btn small secondary' }, '＋ 再加一家公司'); more.onclick = function () { left = movable; addBlock(''); };
+    dlg.appendChild(more); dlg.appendChild(sumLine);
+    // 匯款來源學習（選填）：這筆款若還在這次選的銀行明細裡，帶出標註、帳號、戶名；否則可自己填標註
+    var found = null;
+    if (bs && m.txnKey) bs.txns.forEach(function (t) { if (t.key === m.txnKey && t.seq === m.txnSeq) found = window.YcBank.parseMemo(t.summary, t.memo); });
+    var tag = el('input', { type: 'text', placeholder: '例如：好日三六五日（選填）' }); tag.value = found && found.payerTag ? found.payerTag : '';
+    field(dlg, '把這個匯款標註也加到改分給的公司（下次自動認得，選填）', tag);
+    dlg.appendChild(info);
+    var acts = el('div', { class: 'actions' }), cancel = el('button', { class: 'btn secondary' }, '取消'), ok = el('button', { class: 'btn' }, '確定改分配');
+    cancel.onclick = closeModal;
+    ok.onclick = function () {
+      info.textContent = '';
+      var moves = [], sum = 0;
+      blocks.forEach(function (b) { b.inputs.forEach(function (x) { var v = Math.round(Number(x[1].value) || 0); if (v > 0) { sum += v; moves.push({ billId: x[0].billId, amount: v }); } }); });
+      if (!moves.length) { info.textContent = '請選擇公司並填改分配的金額。'; return; }
+      if (sum > m.amount) { info.textContent = '改分配合計 ' + money(sum) + ' 超過這筆收款 ' + money(m.amount) + '。'; return; }
+      ok.disabled = true;
+      var learn = (tag.value.trim() || (found && (found.payerAccount || found.payerName))) ? { tag: tag.value.trim(), accounts: found && found.payerAccount ? [found.payerAccount] : [], names: found && found.payerName ? [found.payerName] : [] } : undefined;
+      call('bank.reassignMatch', { matchId: m.matchId, moves: moves, learn: learn }, function () { closeModal(); loadLedger(d.period); }, function (e) { ok.disabled = false; info.textContent = e.message; });
+    };
+    acts.appendChild(cancel); acts.appendChild(ok); dlg.appendChild(acts);
   }
 
   function registerDialog(r, d) {
@@ -2202,6 +2264,11 @@
     opts.forEach(function (o) { sel.appendChild(el('option', { value: o[0] }, o[1])); });
     var note = el('input', { type: 'text', placeholder: '備註（必填）' });
     field(m, '處理方式', sel); field(m, '備註', note);
+    if (!under) {
+      var tr2 = el('button', { class: 'btn small secondary', style: 'margin-top:6px' }, '多收的其實是別家的？轉給其他請款單…');
+      tr2.onclick = function () { var cands = r.matches.filter(function (x) { return x.canCancel; }); closeModal(); if (!cands.length) { alert('這張請款單沒有可以改分配的收款（銀行入帳的改分配需要收款對帳權限）。'); return; } reassignDialog(r, cands.sort(function (a, b) { return b.amount - a.amount; })[0], d); };
+      m.appendChild(tr2);
+    }
     var msg = el('div', { class: 'msg err' }), acts = el('div', { class: 'actions' });
     var cancel = el('button', { class: 'btn secondary' }, '取消'), ok = el('button', { class: 'btn' }, '確定');
     cancel.onclick = closeModal;
