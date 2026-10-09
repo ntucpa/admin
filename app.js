@@ -1752,7 +1752,7 @@
 
       if (d.tax) {
         var k2 = ovCard(grid, '營業稅');
-        if (!d.tax.profile.vatFiling || d.tax.profile.vatExcluded) k2.appendChild(el('div', { class: 'muted' }, '這家設為非營業稅申報客戶。'));
+        if (d.tax.profile.vatExcluded) k2.appendChild(el('div', { class: 'muted' }, '這家設為非營業稅申報客戶。'));
         if (!d.tax.periods.length) k2.appendChild(el('div', { class: 'muted' }, '尚無營業稅期別資料。'));
         d.tax.periods.forEach(function (p) {
           var v = el('span');
@@ -1784,7 +1784,8 @@
       if (d.intake) {
         var k5 = ovCard(grid, '客戶上傳文件');
         if (!d.intake.length) k5.appendChild(el('div', { class: 'muted' }, '尚無上傳紀錄。'));
-        d.intake.forEach(function (m) { ovRow(k5, m.yearMonth.slice(0, 3) + ' 年 ' + Number(m.yearMonth.slice(3)) + ' 月', m.files + ' 份（已處理 ' + m.processed + (m.review ? '、待確認 ' + m.review : '') + '）' + (m.lastReceivedAt ? '　最後 ' + fmtTime(m.lastReceivedAt) : '')); });
+        var ymLabel = function (ym) { var s = String(ym || '').replace(/\D/g, ''); if (s.length === 6 && Number(s.slice(0, 4)) >= 1900) return (Number(s.slice(0, 4)) - 1911) + ' 年 ' + Number(s.slice(4)) + ' 月'; if (s.length === 5) return Number(s.slice(0, 3)) + ' 年 ' + Number(s.slice(3)) + ' 月'; return String(ym || ''); };
+        d.intake.forEach(function (m) { ovRow(k5, ymLabel(m.yearMonth), m.files + ' 份（已處理 ' + m.processed + (m.review ? '、待確認 ' + m.review : '') + '）' + (m.lastReceivedAt ? '　最後 ' + fmtTime(m.lastReceivedAt) : '')); });
         ovGo(k5, '到客戶上傳文件', 'intake');
       }
 
