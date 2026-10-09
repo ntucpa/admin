@@ -2468,7 +2468,19 @@
     modalActions(m, '標記', function (fail) {
       var n = Number(amt.value);
       if (!Number.isInteger(n) || n <= 0) return fail('代墊金額要填大於 0 的整數');
-      call('bank.markAdvance', { filingId: r.filingId, amount: n, advancedAt: dt.value || undefined, note: note.value.trim() }, function () { closeModal(); loadTax(taxData.period.periodId); }, function (e) { fail(e.message); });
+      var args = { filingId: r.filingId, amount: n, advancedAt: dt.value || undefined, note: note.value.trim() };
+      function send(force) {
+        if (force) args.force = true;
+        call('bank.markAdvance', args, function (res) {
+          closeModal();
+          if (res && res.alreadyRecovered) alert('已標記，但這一期的請款單已全額對帳，所以這筆代墊直接顯示為「已收回」。');
+          loadTax(taxData.period.periodId);
+        }, function (e) {
+          if (e.code === 'ALREADY_PAID' && confirm(e.message)) return send(true);
+          fail(e.message);
+        });
+      }
+      send(false);
     });
   }
 
