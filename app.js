@@ -2216,7 +2216,7 @@
     box.appendChild(acts);
     if (r.advanceOpen > 0) {
       var av = el('div', { class: 'muted', style: 'margin-top:8px;color:#9a5b00' }, '這家客戶尚有未收回代墊 ' + money(r.advanceOpen) + ' 元（代墊不併入請款單金額）。');
-      var avb = el('button', { class: 'linkbtn', style: 'margin-left:6px' }, '看代墊帳'); avb.onclick = function () { advPreset = r.companyId; bankTab = 'advance'; showBankPage(); };
+      var avb = el('button', { class: 'linkbtn', style: 'margin-left:6px' }, '看代墊帳款'); avb.onclick = function () { advPreset = r.companyId; bankTab = 'advance'; showBankPage(); };
       av.appendChild(avb); box.appendChild(av);
     }
     return box;
@@ -2334,7 +2334,7 @@
   function sha256Hex(text) { return crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)).then(hex); }
   function dateMs(dt) { return Date.parse(dt.slice(0, 10).replace(/\//g, '-') + 'T00:00:00'); }
 
-  /* ---------- 代墊帳（M2 第 5 步 5A，規格八之一）：在稅務申報頁公司視窗「標記先代墊」後建立；客戶層級的應收，不併入請款單金額 ---------- */
+  /* ---------- 代墊帳款（M2 第 5 步 5A，規格八之一）：在稅務申報頁公司視窗「標記先代墊」後建立；客戶層級的應收，不併入請款單金額 ---------- */
   var ADV_STATUS = { OPEN: ['未收回', 'warn'], PARTIAL: ['部分收回', 'warn'], RECOVERED: ['已收回', 'ok'], WRITTEN_OFF: ['已沖銷', 'off'] };
   var ADV_TAX = { VAT: '營業稅', PREPAY: '暫繳' };
   var advState = null, advPreset = '';   // advState: { data, status, q, open }；advPreset：從客戶帳款表跳來時預填的搜尋字
@@ -2360,7 +2360,7 @@
     var rf = el('button', { class: 'btn small secondary' }, '重新整理'); rf.onclick = function () { loadAdvances(advState.status); };
     bar.appendChild(fil); bar.appendChild(q); bar.appendChild(rf); box.appendChild(bar);
     if (!d.canWrite) box.appendChild(el('div', { class: 'alert' }, '唯讀模式：系統同步異常，暫時無法沖銷或取消標記。'));
-    box.appendChild(el('div', { class: 'muted', style: 'margin-bottom:6px' }, '代墊由您手動決定：到「稅務申報」點公司簡稱 → 標記先代墊。代墊帳是客戶層級的應收，不併入請款單金額。已代墊超過 ' + d.overdueDays + ' 天仍未收回會標「逾期」（天數由超級管理員在稅務模組設定修改）。金額單位：元。'));
+    box.appendChild(el('div', { class: 'muted', style: 'margin-bottom:6px' }, '代墊由您手動決定：到「稅務申報」點公司簡稱 → 標記先代墊。代墊帳款是客戶層級的應收，不併入請款單金額。已代墊超過 ' + d.overdueDays + ' 天仍未收回會標「逾期」（天數由超級管理員在稅務模組設定修改）。金額單位：元。'));
     var tbl = el('div'); box.appendChild(tbl);
     function paint() {
       tbl.innerHTML = '';
@@ -2477,7 +2477,7 @@
       c.appendChild(el('div', { class: 'card-title' }, '先代墊逾期天數'));
       if (!r.canWrite) c.appendChild(el('div', { class: 'alert' }, '系統同步異常，目前只能查看，不能儲存。'));
       var inp = el('input', { type: 'number', min: '1', max: '365', style: 'width:120px' }); inp.value = s.overdueDays; inp.oninput = function () { s.overdueDays = Number(inp.value); };
-      field(c, '代墊超過幾天還沒收回就標示逾期', inp, '預設 ' + r.defaultOverdueDays + ' 天；逾期的代墊會在「收款對帳 → 代墊帳」標紅色「逾期」。');
+      field(c, '代墊超過幾天還沒收回就標示逾期', inp, '預設 ' + r.defaultOverdueDays + ' 天；逾期的代墊會在「收款對帳 → 代墊帳款」標紅色「逾期」。');
       var save = el('button', { class: 'btn' }, '儲存'); save.disabled = !r.canWrite;
       var out = el('span', { class: 'muted', style: 'margin-left:10px' });
       save.onclick = function () {
@@ -2490,9 +2490,9 @@
 
   function showBankPage() {
     var hasBank = me && (me.role === 'SUPER_ADMIN' || (me.features || []).indexOf('BANK_RECONCILIATION') >= 0);
-    if (!hasBank && bankTab !== 'advance') bankTab = 'ledger'; // 只有稅務申報權限者只看得到客戶帳款表與代墊帳
+    if (!hasBank && bankTab !== 'advance') bankTab = 'ledger'; // 只有稅務申報權限者只看得到客戶帳款表與代墊帳款
     var tabs = $('bankTabs'); tabs.innerHTML = '';
-    (hasBank ? [['ledger', '客戶帳款表'], ['advance', '代墊帳'], ['stmt', '匯入銀行明細'], ['alias', '客戶資料']] : [['ledger', '客戶帳款表'], ['advance', '代墊帳']]).forEach(function (t) {
+    (hasBank ? [['ledger', '客戶帳款表'], ['stmt', '匯入銀行明細'], ['alias', '客戶資料'], ['advance', '代墊帳款']] : [['ledger', '客戶帳款表'], ['advance', '代墊帳款']]).forEach(function (t) {
       var b = el('button', { class: 'btn small' + (bankTab === t[0] ? '' : ' secondary') }, t[1]);
       b.onclick = function () { bankTab = t[0]; showBankPage(); }; tabs.appendChild(b);
     });
