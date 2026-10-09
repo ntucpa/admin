@@ -2051,7 +2051,10 @@
   var bs = null;   // 本次選檔的工作階段：{ fileName, txns, rows, ctx, tab, info }
   var RULE_LABEL = { A: '金額相符', B: '差匯費', C: '分次加總', D: '一筆多張', E: '只憑金額', F: '金額不符（部分收款或差額）', MANUAL: '手動指定', TAX_REF: '銷帳編號＋稅額' };
   var BANK_TABS = [['exact', '完全相符'], ['propose', '建議'], ['unmatched', '未對上'], ['tax', '代繳稅款'], ['othertax', '其他代繳稅款'], ['done', '已處理／非客戶']];
-  function dateRange() { var d = bs.txns.map(function (t) { return t.dt.slice(0, 10); }).sort(); return { from: d[0], to: d[d.length - 1] }; }
+  /** 預設只處理檔案最後一筆往前 60 天（業主 2026-10-09 決定）；日期用 2026-10-08 格式 */
+  function defaultFrom(latest) { var d = new Date(latest.replace(/\//g, '-') + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() - 60); return d.toISOString().slice(0, 10); }
+  function inScopeTx(tx) { return tx.dt.slice(0, 10).replace(/\//g, '-') >= bs.from.replace(/\//g, '-'); }
+  function dateRange() { return { from: bs.from.replace(/-/g, '/'), to: bs.maxDate }; }
   function reloadCtx(then) { call('bank.getContext', dateRange(), function (ctx) { bs.ctx = ctx; bs.ctxAt = new Date(); buildRows(); renderStmt(); if (then) then(); }, function (e) { renderStmt(); alert('重新取得比對資料失敗：' + e.message + '\n請重新整理頁面。'); }); }
   function money(n) { return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
   function sha256Hex(text) { return crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)).then(hex); }
@@ -2092,11 +2095,12 @@
       if (!r.txns.length) { msg.textContent = '這份明細沒有存入或繳費轉出的交易。'; return; }
       var dts = r.txns.map(function (t) { return t.dt.slice(0, 10); }).sort();
       var seqOf = {};
+      var fromDef = defaultFrom(dts[dts.length - 1]);
       return Promise.all(r.txns.map(function (t) { return sha256Hex(window.YcBank.txnKeyText(t)); })).then(function (keys) {
         r.txns.forEach(function (t, i) { t.key = keys[i]; seqOf[t.key] = (seqOf[t.key] || 0) + 1; t.seq = seqOf[t.key]; });
         msg.textContent = '取得比對資料…';
-        call('bank.getContext', { from: dts[0], to: dts[dts.length - 1] }, function (ctx) {
-          bs = { fileName: file.name, txns: r.txns, ctx: ctx, ctxAt: new Date(), tab: 'exact', rows: null, sug: null };
+        call('bank.getContext', { from: fromDef < dts[0] ? dts[0] : fromDef, to: dts[dts.length - 1] }, function (ctx) {
+          bs = { fileName: file.name, txns: r.txns, ctx: ctx, ctxAt: new Date(), tab: 'exact', rows: null, sug: null, from: fromDef < dts[0] ? dts[0] : fromDef, minDate: dts[0], maxDate: dts[dts.length - 1] };
           buildRows(); renderStmt();
         }, function (e) { msg.textContent = ''; msg.appendChild(el('span', { class: 'msg err' }, e.message)); });
       });
@@ -2108,7 +2112,8 @@
     var ctx = bs.ctx, set = ctx.settings, handled = {};
     ctx.handled.forEach(function (h) { handled[h] = 1; });
     var prev = {}; (bs.rows || []).forEach(function (r) { prev[r.tx.key + '#' + r.tx.seq] = r; });
-    var rows = bs.txns.map(function (tx) {
+    bs.beforeN = bs.txns.filter(function (tx) { return !inScopeTx(tx); }).length;
+    var rows = bs.txns.filter(inScopeTx).map(function (tx) {
       var p = window.YcBank.parseMemo(tx.summary, tx.memo);
       var kind = window.YcBank.classify(tx, { keywords: set.nonCustomerKeywords, categories: catKinds(set.taxPayCategories) });
       var old = prev[tx.key + '#' + tx.seq];
@@ -2163,9 +2168,16 @@
     var at = bs.ctxAt ? bs.ctxAt.getHours() + ':' + ('0' + bs.ctxAt.getMinutes()).slice(-2) : '';
     head.appendChild(el('span', { class: 'muted' }, '比對資料取得時間 ' + at + '（待收請款單 ' + bs.ctx.bills.length + ' 張、匯款來源 ' + bs.ctx.aliases.length + ' 筆）'));
     box.appendChild(head);
+    var dateBar = el('div', { class: 'toolbar' });
+    dateBar.appendChild(document.createTextNode('只處理這個日期之後的交易（含當天）：'));
+    var dIn = el('input', { type: 'date', style: 'width:auto' }); dIn.value = bs.from.replace(/\//g, '-'); dIn.min = bs.minDate.replace(/\//g, '-'); dIn.max = bs.maxDate.replace(/\//g, '-');
+    dIn.onchange = function () { if (!dIn.value) return; bs.from = dIn.value; reloadCtx(); };
+    dateBar.appendChild(dIn);
+    dateBar.appendChild(el('span', { class: 'muted' }, '預設是檔案最後一筆往前 60 天；更早的 ' + bs.beforeN + ' 筆不列出、不處理、也不會被標記。'));
+    box.appendChild(dateBar);
     var counts = {}; rows.forEach(function (r) { var t = tabOf(r); counts[t] = (counts[t] || 0) + 1; });
     var doneN = rows.filter(function (r) { return r.done; }).length;
-    box.appendChild(el('div', { class: 'muted', style: 'margin-bottom:6px' }, '共 ' + rows.length + ' 筆（存入與繳費轉出）；先前已處理 ' + doneN + ' 筆不再列出。交易明細只在這個頁面，關閉或重新整理就消失。'));
+    box.appendChild(el('div', { class: 'muted', style: 'margin-bottom:6px' }, '處理範圍內共 ' + rows.length + ' 筆（存入與繳費轉出）；先前已處理 ' + doneN + ' 筆不再列出。交易明細只在這個頁面，關閉或重新整理就消失。'));
     if (!bs.ctx.canWrite) box.appendChild(el('div', { class: 'alert' }, '唯讀模式：系統同步異常，暫時無法送出。'));
     renderSuggestions(box);
     var tabs = el('div', { class: 'toolbar' });
@@ -2233,46 +2245,63 @@
     return tr;
   }
 
-  /** 指定／改選客戶：選公司 → 列出它的待收請款單 → 填各張分配金額（合計＝交易金額） */
+  /** 指定／改選客戶：可選一家或多家公司（一筆款付多家），每家列出待收請款單，填各張分配金額（合計＝交易金額） */
   function chooseDialog(r) {
-    var m = openModal('指定客戶與請款單'); $('modal').style.width = 'min(760px,96vw)';
+    var m = openModal('指定客戶與請款單'); $('modal').style.width = 'min(800px,96vw)';
     m.appendChild(el('div', { class: 'muted' }, r.tx.dt.slice(0, 16) + '　金額 ' + money(r.tx.amount) + '　' + payerText(r)));
-    var comp = el('select'); comp.appendChild(el('option', { value: '' }, '請選擇公司'));
-    bs.ctx.companies.forEach(function (c) { comp.appendChild(el('option', { value: c.companyId }, c.companyId + ' ' + (c.shortName || c.name))); });
-    var cur = r.match && r.match.allocations.length ? r.match.allocations[0].companyId : '';
-    comp.value = cur; field(m, '公司', comp);
-    var box = el('div'), info = el('div', { class: 'msg err' }), inputs = [];
+    var blocksBox = el('div'), blocks = [], info = el('div', { class: 'msg err' }), sumLine = el('div', { style: 'font-weight:600;margin:6px 0' });
+    var used = {}; bs.rows.forEach(function (x) { if (x !== r && x.manual) x.manual.allocations.forEach(function (a) { used[a.billId] = 1; }); });
+    var prev = {}; if (r.manual) r.manual.allocations.forEach(function (a) { prev[a.billId] = a.allocated; });
+    var left = r.manual ? 0 : r.tx.amount;
+    function paintSum() {
+      var sum = 0; blocks.forEach(function (b) { b.inputs.forEach(function (x) { sum += Math.round(Number(x[1].value) || 0); }); });
+      sumLine.textContent = '分配合計 ' + money(sum) + '／交易金額 ' + money(r.tx.amount) + (sum === r.tx.amount ? '　✔' : '　（必須相等）');
+    }
+    function addBlock(companyId) {
+      var blk = { inputs: [], comp: el('select') }, card = el('div', { class: 'card', style: 'margin:8px 0' }), box = el('div');
+      blk.comp.appendChild(el('option', { value: '' }, '請選擇公司'));
+      bs.ctx.companies.forEach(function (c) { blk.comp.appendChild(el('option', { value: c.companyId }, c.companyId + ' ' + (c.shortName || c.name))); });
+      blk.comp.value = companyId || '';
+      function paint() {
+        box.innerHTML = ''; blk.inputs = [];
+        if (!blk.comp.value) { paintSum(); return; }
+        var other = {}; blocks.forEach(function (b) { if (b !== blk) b.inputs.forEach(function (x) { other[x[0].billId] = 1; }); });
+        var bills = bs.ctx.bills.filter(function (b) { return b.companyId === blk.comp.value && !used[b.billId] && !other[b.billId]; });
+        if (!bills.length) { box.appendChild(el('div', { class: 'muted' }, '這家公司目前沒有待收的請款單。')); paintSum(); return; }
+        var t = el('table'), h = el('tr'); ['請款單', '待收', '分配金額'].forEach(function (x) { h.appendChild(el('th', {}, x)); }); t.appendChild(h);
+        bills.forEach(function (b) {
+          var tr = el('tr'); tr.appendChild(el('td', {}, billLabel(b.billId).replace(/（待收.*$/, ''))); tr.appendChild(el('td', {}, money(b.remaining)));
+          var inp = el('input', { type: 'number', min: '0', style: 'width:120px' });
+          var pre = r.manual ? (prev[b.billId] || 0) : Math.min(left, b.remaining);
+          if (!r.manual) left -= pre;
+          inp.value = pre > 0 ? pre : ''; inp.oninput = paintSum;
+          var td = el('td'); td.appendChild(inp); tr.appendChild(td); t.appendChild(tr); blk.inputs.push([b, inp]);
+        });
+        box.appendChild(t); paintSum();
+      }
+      blk.comp.onchange = function () { left = 0; paint(); };
+      var top = el('div', { class: 'toolbar' }); top.appendChild(blk.comp);
+      var rm = el('button', { class: 'linkbtn' }, '移除這家'); rm.onclick = function () { blocks.splice(blocks.indexOf(blk), 1); card.remove(); paintSum(); };
+      if (blocks.length) top.appendChild(rm);
+      card.appendChild(top); card.appendChild(box); blocksBox.appendChild(card); blocks.push(blk); paint();
+    }
+    var first = r.manual ? r.manual.allocations.map(function (a) { return a.companyId; }).filter(function (c, i, arr) { return arr.indexOf(c) === i; })
+      : (r.match && r.match.allocations.length ? [r.match.allocations[0].companyId] : ['']);
+    first.forEach(addBlock);
+    m.appendChild(blocksBox);
+    var more = el('button', { class: 'btn small secondary' }, '＋ 再加一家公司（一筆款付多家時）'); more.onclick = function () { left = 0; addBlock(''); };
+    m.appendChild(more); m.appendChild(sumLine);
     var learnCb = el('input', { type: 'checkbox' }); learnCb.checked = r.learn !== false;
     var learnLab = el('label', { style: 'display:flex;gap:6px;align-items:center;margin-top:8px' }); learnLab.appendChild(learnCb);
-    learnLab.appendChild(el('span', {}, '把這個匯款來源加入對照（' + [r.p.payerTag && '標註 ' + r.p.payerTag, r.p.payerAccount && '帳號 ' + r.p.payerAccount, r.p.payerName && '戶名 ' + r.p.payerName].filter(Boolean).join('、') + '），下次自動認得'));
-    function paint() {
-      box.innerHTML = ''; inputs = [];
-      if (!comp.value) return;
-      var used = {}; bs.rows.forEach(function (x) { if (x !== r && x.manual) x.manual.allocations.forEach(function (a) { used[a.billId] = 1; }); });
-      var bills = bs.ctx.bills.filter(function (b) { return b.companyId === comp.value && !used[b.billId]; });
-      if (!bills.length) { box.appendChild(el('div', { class: 'muted' }, '這家公司目前沒有待收的請款單。')); return; }
-      var left = r.tx.amount;
-      var t = el('table'), h = el('tr'); ['請款單', '待收', '分配金額'].forEach(function (x) { h.appendChild(el('th', {}, x)); }); t.appendChild(h);
-      bills.forEach(function (b) {
-        var tr = el('tr'); tr.appendChild(el('td', {}, billLabel(b.billId).replace(/（待收.*$/, ''))); tr.appendChild(el('td', {}, money(b.remaining)));
-        var inp = el('input', { type: 'number', min: '0', style: 'width:120px' });
-        var pre = r.manual ? (r.manual.allocations.filter(function (a) { return a.billId === b.billId; })[0] || { allocated: 0 }).allocated : Math.min(left, b.remaining);
-        if (!r.manual) left -= pre;
-        inp.value = pre > 0 ? pre : ''; var td = el('td'); td.appendChild(inp); tr.appendChild(td); t.appendChild(tr); inputs.push([b, inp]);
-      });
-      box.appendChild(t);
-      box.appendChild(el('div', { class: 'muted' }, '分配金額合計必須等於交易金額 ' + money(r.tx.amount) + '。少於待收的部分會成為「部分收款」；差額在匯費容許（' + bs.ctx.settings.fee + ' 元）內視為匯費。'));
-    }
-    comp.onchange = function () { r.manual = null; paint(); };
-    paint();
-    m.appendChild(box); m.appendChild(learnLab); m.appendChild(info);
+    learnLab.appendChild(el('span', {}, '把這個匯款來源加入對照（' + [r.p.payerTag && '標註 ' + r.p.payerTag, r.p.payerAccount && '帳號 ' + r.p.payerAccount, r.p.payerName && '戶名 ' + r.p.payerName].filter(Boolean).join('、') + '），下次自動認得；選了多家公司就對每一家都加'));
+    m.appendChild(learnLab); m.appendChild(info);
     var acts = el('div', { class: 'actions' }), cancel = el('button', { class: 'btn secondary' }, '取消'), ok = el('button', { class: 'btn' }, '確定');
     cancel.onclick = closeModal;
     ok.onclick = function () {
       info.textContent = '';
       var allocs = [], sum = 0, tol = bs.ctx.settings.fee;
-      inputs.forEach(function (x) { var v = Math.round(Number(x[1].value) || 0); if (v > 0) { sum += v; var fee = x[0].remaining - v; allocs.push({ billId: x[0].billId, companyId: x[0].companyId, allocated: v, fee: fee >= 1 && fee <= tol ? fee : 0 }); } });
-      if (!comp.value || !allocs.length) { info.textContent = '請選擇公司並填寫分配金額。'; return; }
+      blocks.forEach(function (b) { b.inputs.forEach(function (x) { var v = Math.round(Number(x[1].value) || 0); if (v > 0) { sum += v; var fee = x[0].remaining - v; allocs.push({ billId: x[0].billId, companyId: x[0].companyId, allocated: v, fee: fee >= 1 && fee <= tol ? fee : 0 }); } }); });
+      if (!allocs.length) { info.textContent = '請選擇公司並填寫分配金額。'; return; }
       if (sum !== r.tx.amount) { info.textContent = '分配金額合計 ' + money(sum) + ' 與交易金額 ' + money(r.tx.amount) + ' 不符。'; return; }
       r.manual = { status: 'PROPOSED', rule: 'MANUAL', known: true, allocations: allocs }; r.learn = learnCb.checked; r.ticked = true; r.touched = true;
       closeModal(); buildRows(); renderStmt();
@@ -2309,21 +2338,23 @@
     d.groups.forEach(function (g) {
       var tr = el('tr'), td = el('td');
       var cell = el('td');
-      if (g.status === 'AUTO') {
-        pick[g.tag] = g.alreadyHas ? '' : g.candidates[0].companyId;
-        var cb = el('input', { type: 'checkbox' }); cb.checked = !g.alreadyHas; cb.onchange = function () { pick[g.tag] = cb.checked ? g.candidates[0].companyId : ''; };
-        td.appendChild(cb); cell.appendChild(document.createTextNode(g.candidates[0].companyId + ' ' + g.candidates[0].name + (g.how === 'prefix' ? '（開頭相符）' : '')));
+      if (g.status === 'AUTO' || g.status === 'COMBO') {
+        var ids = g.candidates.map(function (c) { return c.companyId; });
+        pick[g.tag] = g.alreadyHas ? [] : ids;
+        var cb = el('input', { type: 'checkbox' }); cb.checked = !g.alreadyHas; cb.onchange = function () { pick[g.tag] = cb.checked ? ids : []; };
+        td.appendChild(cb); cell.appendChild(document.createTextNode(g.candidates.map(function (c) { return c.companyId + ' ' + c.name; }).join('、') + (g.status === 'COMBO' ? '（標註含多家）' : (g.how === 'prefix' ? '（開頭相符）' : ''))));
       } else {
         var s = el('select'); s.appendChild(el('option', { value: '' }, '— 不加入 —'));
         d.companies.forEach(function (c) { s.appendChild(el('option', { value: c.id }, c.id + ' ' + c.name)); });
-        s.onchange = function () { pick[g.tag] = s.value; }; cell.appendChild(s);
+        s.onchange = function () { pick[g.tag] = s.value ? [s.value] : []; }; cell.appendChild(s);
       }
       tr.appendChild(td); tr.appendChild(el('td', {}, g.tag)); tr.appendChild(el('td', {}, String(g.count))); tr.appendChild(cell); t.appendChild(tr);
     });
     body.appendChild(t);
     var msg = el('div', { class: 'msg err' }), go1 = el('button', { class: 'btn small' }, '加入勾選的來源'); go1.disabled = !d.canWrite;
     go1.onclick = function () {
-      var items = d.groups.filter(function (g) { return pick[g.tag]; }).map(function (g) { return { companyId: pick[g.tag], tag: g.tag, accounts: g.accounts, names: g.names }; });
+      var items = [];
+      d.groups.forEach(function (g) { (pick[g.tag] || []).forEach(function (cid) { items.push({ companyId: cid, tag: g.tag, accounts: g.accounts, names: g.names }); }); });
       if (!items.length) { msg.textContent = '沒有勾選任何來源。'; return; }
       go1.disabled = true;
       call('bank.addAliases', { items: items }, function (r) {
@@ -2342,12 +2373,15 @@
       if (r.kind === 'TAX_PAYMENT') items.push({ txnKey: r.tx.key, txnSeq: r.tx.seq, txnDate: r.tx.dt, txnAmount: -r.tx.amount, rule: 'TAX_REF', allocations: [{ targetType: 'TAX_FILING', targetId: al[0].filingId, allocated: al[0].allocated, fee: 0 }] });
       else {
         items.push({ txnKey: r.tx.key, txnSeq: r.tx.seq, txnDate: r.tx.dt, txnAmount: r.tx.amount, rule: r.match.rule, allocations: al.map(function (a) { return { targetType: 'BILL', targetId: a.billId, allocated: a.allocated, fee: a.fee }; }) });
-        if (r.learn !== false && al.length === 1 && (r.p.payerTag || r.p.payerAccount || r.p.payerName)) {
-          var k = al[0].companyId; learnBy[k] = learnBy[k] || { companyId: k, tag: '', accounts: [], names: [], fee: 0 };
-          var L = learnBy[k]; if (r.p.payerTag && !L.tag) L.tag = r.p.payerTag;
-          if (r.p.payerAccount && L.accounts.indexOf(r.p.payerAccount) < 0) L.accounts.push(r.p.payerAccount);
-          if (r.p.payerName && L.names.indexOf(r.p.payerName) < 0) L.names.push(r.p.payerName);
-          if (r.match.rule === 'B' && al[0].fee > 0 && !L.fee) L.fee = al[0].fee;
+        if (r.learn !== false && (r.p.payerTag || r.p.payerAccount || r.p.payerName)) {
+          // 一筆款分給多家公司時，帳號、戶名、標註對每一家都學（同帳號可對多家）
+          al.forEach(function (a) {
+            var k = a.companyId; learnBy[k] = learnBy[k] || { companyId: k, tag: '', accounts: [], names: [], fee: 0 };
+            var L = learnBy[k]; if (r.p.payerTag && !L.tag) L.tag = r.p.payerTag;
+            if (r.p.payerAccount && L.accounts.indexOf(r.p.payerAccount) < 0) L.accounts.push(r.p.payerAccount);
+            if (r.p.payerName && L.names.indexOf(r.p.payerName) < 0) L.names.push(r.p.payerName);
+            if (r.match.rule === 'B' && a.fee > 0 && !L.fee) L.fee = a.fee;
+          });
         }
       }
     });
@@ -2567,10 +2601,13 @@
   function renderBootstrap(body, pv) {
     body.innerHTML = '';
     var sel = {}; // tag → 'ACCEPT'（接受自動對上）／'SKIP'／公司編號
-    var auto = pv.groups.filter(function (g) { return g.status === 'AUTO'; }), todo = pv.groups.filter(function (g) { return g.status !== 'AUTO'; });
+    function isAuto(g) { return g.status === 'AUTO' || g.status === 'COMBO'; }
+    var auto = pv.groups.filter(isAuto), todo = pv.groups.filter(function (g) { return !isAuto(g); });
     var summary = el('div', { style: 'margin:8px 0;font-weight:600' });
-    function value(g) { return sel[g.tag] === undefined ? (g.status === 'AUTO' ? 'ACCEPT' : '') : sel[g.tag]; }
-    function companyOf(g) { var v = value(g); return v === 'ACCEPT' ? g.candidates[0].companyId : (v && v !== 'SKIP' ? v : ''); }
+    function value(g) { return sel[g.tag] === undefined ? (isAuto(g) ? 'ACCEPT' : '') : sel[g.tag]; }
+    /** 這個標註要建立到哪些公司（一般是一家；標註含多家簡稱時是多家） */
+    function companiesOf(g) { var v = value(g); return v === 'ACCEPT' ? g.candidates.map(function (c) { return c.companyId; }) : (v && v !== 'SKIP' ? [v] : []); }
+    function companyOf(g) { return companiesOf(g).length ? 'x' : ''; }
     function paintSummary() {
       var n = pv.groups.filter(function (g) { return companyOf(g); }).length, skip = pv.groups.length - n, hot = pv.groups.filter(function (g) { return !companyOf(g) && g.suggest; }).length;
       summary.textContent = '將建立 ' + n + ' 個標註的對照；略過 ' + skip + ' 個' + (hot ? '（其中 ' + hot + ' 個出現過多次，建議確認是不是客戶）' : '') + '。';
@@ -2588,7 +2625,7 @@
         if (!choose) {
           var cb = el('input', { type: 'checkbox' }); cb.checked = value(g) === 'ACCEPT';
           cb.onchange = function () { sel[g.tag] = cb.checked ? 'ACCEPT' : 'SKIP'; paintSummary(); };
-          td.appendChild(document.createTextNode(g.candidates[0].companyId + ' ' + g.candidates[0].name + (g.how === 'prefix' ? '（開頭相符）' : '')));
+          td.appendChild(document.createTextNode(g.candidates.map(function (c) { return c.companyId + ' ' + c.name; }).join('、') + (g.status === 'COMBO' ? '（標註含多家，一筆款分給這幾家）' : (g.how === 'prefix' ? '（開頭相符）' : ''))));
           td2.appendChild(cb); td2.appendChild(document.createTextNode(' 加入')); if (g.alreadyHas) td2.appendChild(badge('已有', 'off'));
         } else {
           var s = el('select');
@@ -2611,7 +2648,8 @@
     var msg = el('div', { class: 'msg err' }), go1 = el('button', { class: 'btn' }, '建立');
     go1.disabled = !pv.canWrite;
     go1.onclick = function () {
-      var items = pv.groups.filter(function (g) { return companyOf(g); }).map(function (g) { return { companyId: companyOf(g), tag: g.tag, accounts: g.accounts, names: g.names }; });
+      var items = [];
+      pv.groups.forEach(function (g) { companiesOf(g).forEach(function (cid) { items.push({ companyId: cid, tag: g.tag, accounts: g.accounts, names: g.names }); }); });
       if (!items.length) { msg.textContent = '沒有可建立的項目。'; return; }
       go1.disabled = true; msg.textContent = '';
       call('bank.bootstrapApply', { items: items }, function (r) { closeModal(); loadBank(); alert('已建立：新增 ' + r.added + ' 筆匯款來源（已存在而略過 ' + r.skipped + ' 筆）。'); }, function (e) { go1.disabled = false; msg.textContent = e.message; });
