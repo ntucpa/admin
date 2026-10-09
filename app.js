@@ -2089,17 +2089,21 @@
     if (f === 'unpaid') return st === 'UNPAID';
     if (f === 'reported') return st === 'REPORTED';
     if (f === 'partial') return st === 'PARTIAL';
+    if (f === 'reportedLate') return st === 'REPORTED' && !!r.reportedAt && dayDiff(r.reportedAt, d.today) > d.warnDays;   // 客戶回報超過 N 天仍對不到入帳
     if (f === 'diff') return (st === 'PARTIAL' || st === 'DIFF') && !r.diffResolution; // 待處理的差額（不含匯費免收與已處理）
     if (f === 'overdue') return open && !!r.dueDate && d.today > r.dueDate;
     if (f === 'done') return st === 'RECONCILED' || st === 'RESOLVED';
     return true;
   }
 
+  var ledgerPreset = null;   // { period, filter }：從首頁卡片點進來時指定帳期（ALL＝全部帳期）與篩選
+  function openLedger(period, filter) { ledgerPreset = { period: period, filter: filter }; bankTab = 'ledger'; go('bank'); }
   function loadLedger(period) {
-    var box = $('bankLedgerView');
+    var box = $('bankLedgerView'), pre = ledgerPreset; ledgerPreset = null;
+    if (pre) period = pre.period;
     if (!lg) box.textContent = '載入中…';
     call('bank.getLedger', { period: period || (lg && lg.data ? lg.data.period : undefined) }, function (d) {
-      lg = { data: d, filter: lg ? lg.filter : 'all', q: lg ? lg.q : '', open: lg ? lg.open : {} };
+      lg = { data: d, filter: pre ? pre.filter : (lg ? lg.filter : 'all'), q: pre ? '' : (lg ? lg.q : ''), open: pre ? {} : (lg ? lg.open : {}) };
       renderLedger();
     }, function (e) { box.textContent = e.message; });
   }
@@ -2109,9 +2113,10 @@
     var bar = el('div', { class: 'toolbar' });
     var per = el('select', { style: 'width:auto' });
     d.periods.forEach(function (p) { per.appendChild(el('option', { value: p }, '帳期 ' + p)); });
+    per.appendChild(el('option', { value: 'ALL' }, '全部帳期'));
     per.value = d.period; per.onchange = function () { lg.open = {}; loadLedger(per.value); };
     var fil = el('select', { style: 'width:auto' });
-    [['all', '全部'], ['unpaid', '未匯款'], ['reported', '客戶已回報未對帳'], ['partial', '部分收款'], ['diff', '有待處理的差額'], ['overdue', '逾期'], ['done', '已對帳']].forEach(function (o) { fil.appendChild(el('option', { value: o[0] }, o[1])); });
+    [['all', '全部'], ['unpaid', '未匯款'], ['reported', '客戶已回報未對帳'], ['reportedLate', '客戶回報逾期'], ['partial', '部分收款'], ['diff', '有待處理的差額'], ['overdue', '逾期'], ['done', '已對帳']].forEach(function (o) { fil.appendChild(el('option', { value: o[0] }, o[1])); });
     fil.value = lg.filter; fil.onchange = function () { lg.filter = fil.value; paint(); };
     var q = el('input', { type: 'text', placeholder: '搜尋統編、簡稱' }); q.value = lg.q; q.oninput = function () { lg.q = q.value; paint(); };
     var rf = el('button', { class: 'btn small secondary' }, '重新整理'); rf.onclick = function () { loadLedger(d.period); };
@@ -2124,11 +2129,13 @@
       var key = lg.q.trim().toLowerCase();
       var list = d.rows.filter(function (r) { return ledgerMatchFilter(r, lg.filter, d) && (!key || (r.companyId + ' ' + r.name).toLowerCase().indexOf(key) >= 0); });
       if (!list.length) { tbl.appendChild(el('div', { class: 'muted' }, d.rows.length ? '沒有符合的請款單。' : '這個帳期還沒有請款單。')); return; }
-      var t = el('table', { class: 'ledger' }), h = el('tr');
+      var isAll = d.period === 'ALL', t = el('table', { class: 'ledger' }), h = el('tr');
+      if (isAll) h.appendChild(el('th', {}, '帳期'));
       ['統編', '簡稱', '類別', '記帳費', '稅金', '其他', '應收', '付款期限', '客戶回報', '實收', '入帳日', '差額', '狀態', ''].forEach(function (x, i) { h.appendChild(el('th', [3, 4, 5, 6, 9, 11].indexOf(i) >= 0 ? { class: 'num' } : {}, x)); }); t.appendChild(h);
       var tot = { total: 0, received: 0, diff: 0 };
       list.forEach(function (r) {
         var st = ledgerStatus(r, d), info = diffInfo(r), tr = el('tr');
+        if (isAll) tr.appendChild(el('td', {}, r.billingPeriod));
         tot.total += r.total; tot.received += r.received; if (info) tot.diff += info.diff;
         [r.companyId, r.name, KIND_LABEL[r.kind] || r.kind, money(r.bookkeeping), money(r.tax), money(r.other), money(r.total), r.dueDate ? r.dueDate.slice(5) : '', r.reportedAt ? r.reportedAt.slice(5) : '', money(r.received), r.receivedAt ? r.receivedAt.slice(5) : ''].forEach(function (x, i) {
           tr.appendChild(el('td', i >= 3 && i <= 6 || i === 9 ? { class: 'num' } : {}, x));
@@ -2145,12 +2152,12 @@
         ex.onclick = function () { lg.open[r.billId] = !lg.open[r.billId]; paint(); };
         op.appendChild(ex); tr.appendChild(op); t.appendChild(tr);
         if (lg.open[r.billId]) {
-          var dr = el('tr'), dt = el('td', { colspan: '14', style: 'background:#f6f8fb' });
+          var dr = el('tr'), dt = el('td', { colspan: String(14 + (isAll ? 1 : 0)), style: 'background:#f6f8fb' });
           dt.appendChild(ledgerDetail(r, d)); dr.appendChild(dt); t.appendChild(dr);
         }
       });
       var fr = el('tr', { style: 'font-weight:600' });
-      fr.appendChild(el('td', { colspan: '6' }, '合計（' + list.length + ' 張）'));
+      fr.appendChild(el('td', { colspan: String(6 + (isAll ? 1 : 0)) }, '合計（' + list.length + ' 張）'));
       fr.appendChild(el('td', { class: 'num' }, money(tot.total))); fr.appendChild(el('td', { colspan: '2' }, ''));
       fr.appendChild(el('td', { class: 'num' }, money(tot.received))); fr.appendChild(el('td', {}, ''));
       fr.appendChild(el('td', { class: 'num' }, tot.diff ? (tot.diff < 0 ? '−' : '') + money(Math.abs(tot.diff)) : '')); fr.appendChild(el('td', { colspan: '2' }, ''));
@@ -3249,9 +3256,10 @@
       an.appendChild(el('div', { style: 'font-weight:700;color:var(--danger);margin-bottom:6px' }, '異常（' + h.anomalies.length + ' 項）'));
       h.anomalies.forEach(function (x) {
         var det = el('details', { style: 'margin:4px 0' });
-        det.appendChild(el('summary', { style: 'cursor:pointer;color:var(--danger)' }, (x.severity === 'high' ? '嚴重｜' : '') + x.label + '：' + x.items.length + ' 家'));
+        det.appendChild(el('summary', { style: 'cursor:pointer;color:var(--danger)' }, (x.severity === 'high' ? '嚴重｜' : '') + x.label + '：' + x.items.length + ' ' + (x.unit || '家')));
         x.items.forEach(function (it) {
           var line = el('div', { style: 'padding:2px 0 2px 18px;font-size:13px' }, it.name + '　' + it.companyId + (it.note ? '　（' + it.note + '）' : ''));
+          if (it.goAdvance) { var gb = el('button', { class: 'linkbtn', style: 'margin-left:8px' }, '到代墊帳款'); gb.onclick = function () { advPreset = it.companyId; bankTab = 'advance'; go('bank'); }; line.appendChild(gb); }
           if (it.seenKey) { var sb = el('button', { class: 'linkbtn', style: 'margin-left:8px' }, '已看過'); sb.onclick = function () { markSeen([it.seenKey]); }; line.appendChild(sb); }
           det.appendChild(line);
         });
@@ -3296,6 +3304,8 @@
       card.appendChild(el('div', { style: 'font-weight:600' }, c.label));
       card.appendChild(el('div', { class: 'muted', style: 'font-size:12px' }, c.hint));
       card.onclick = function () {
+        if (c.key === 'reconDiff') { openLedger('ALL', 'diff'); return; }            // 收款對帳：跨期，直接帶篩選
+        if (c.key === 'reportedLate') { openLedger('ALL', 'reportedLate'); return; }
         if (CARD_NOTICE[c.key]) { if (taxData && taxData.period) noticeDialog(CARD_NOTICE[c.key]); return; } // 通知類卡片：直接開發送清單（沒有該發的也能開，可看已發過的）
         if (!c.count) return;
         taxAFocus = { label: c.label, ids: c.filingIds }; taxView = 'A';
