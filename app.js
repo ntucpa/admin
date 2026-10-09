@@ -2167,7 +2167,7 @@
       var m = openModal('差額已處理');
       m.appendChild(el('div', { class: 'muted' }, r.companyId + ' ' + r.name + '　應收 ' + money(r.total) + '，已收 ' + money(r.received + r.fee)));
       m.appendChild(el('p', {}, '處理方式：' + (DIFF_LABEL[r.diffResolution] || r.diffResolution)));
-      m.appendChild(el('p', {}, '備註：' + (r.diffNote || '（無）') + (r.resolvedBy ? '（' + r.resolvedBy + ' ' + (r.resolvedAt || '').slice(0, 10) + '）' : '')));
+      m.appendChild(el('p', {}, '備註：' + (r.diffNote || '（無）') + (r.resolvedBy ? '（' + (String(r.resolvedBy).indexOf('ADVANCE:') === 0 ? '系統：代墊已收回' : r.resolvedBy) + ' ' + (r.resolvedAt || '').slice(0, 10) + '）' : '')));
       var acts = el('div', { class: 'actions' }), close = el('button', { class: 'btn secondary' }, '關閉'); close.onclick = closeModal;
       var re = el('button', { class: 'btn secondary' }, '重新選擇處理方式'); re.disabled = !d.canWrite || rem === 0; re.onclick = function () { closeModal(); resolveDialog(r, d); };
       var ro = el('button', { class: 'btn' }, '撤銷處理'); ro.disabled = !d.canWrite;
@@ -2376,7 +2376,7 @@
         [a.companyId, a.name, a.periodLabel || '', ADV_TAX[a.taxType] || a.taxType, money(a.amount), a.advancedAt ? a.advancedAt.slice(5) : '', a.status === 'OPEN' || a.status === 'PARTIAL' ? String(a.days) : '', a.recovered ? money(a.recovered) : '', a.remaining ? money(a.remaining) : ''].forEach(function (x, i) {
           tr.appendChild(el('td', [4, 6, 7, 8].indexOf(i) >= 0 ? { class: 'num' } : {}, x));
         });
-        var sd = el('td'); sd.appendChild(badge(s[0], s[1])); if (a.overdue) sd.appendChild(badge('逾期', 'err')); tr.appendChild(sd);
+        var sd = el('td'); sd.appendChild(badge(s[0], s[1])); if (a.overdue) { var ob = badge('逾期', 'err'), why = []; if (a.overdueReasons && a.overdueReasons.days) why.push('已代墊超過 ' + d.overdueDays + ' 天仍未收回'); if (a.overdueReasons && a.overdueReasons.nextBill) why.push('下期請款單（' + a.overdueReasons.nextBill + ' 帳期）已匯入，但沒有補收這筆代墊'); ob.title = why.join('；'); sd.appendChild(ob); } tr.appendChild(sd);
         var op = el('td'), ex = el('button', { class: 'linkbtn' }, advState.open[a.advanceId] ? '收合' : '展開');
         ex.onclick = function () { advState.open[a.advanceId] = !advState.open[a.advanceId]; paint(); };
         op.appendChild(ex);
@@ -2388,6 +2388,9 @@
           bx.appendChild(el('div', {}, '標記人：' + (a.createdBy || '') + '　代墊日：' + a.advancedAt));
           bx.appendChild(el('div', {}, '備註：' + (a.note || '（無）')));
           bx.appendChild(el('div', {}, '收回來源：' + (a.recoveredBy || (a.recovered ? '' : '（尚未收回）'))));
+          if (a.overdue) bx.appendChild(el('div', { style: 'color:#b42318' }, '逾期原因：' + [(a.overdueReasons && a.overdueReasons.days) ? '已代墊超過 ' + d.overdueDays + ' 天仍未收回' : '', (a.overdueReasons && a.overdueReasons.nextBill) ? '下期請款單（' + a.overdueReasons.nextBill + ' 帳期）已匯入，但沒有補收這筆代墊' : ''].filter(Boolean).join('；')));
+          var BS = { UNPAID: '未收', REPORTED: '客戶已回報', PARTIAL: '部分收款', DIFF: '多收', RECONCILED: '已對帳', RESOLVED: '已處理' };
+          (a.links || []).forEach(function (l) { bx.appendChild(el('div', {}, '補收項目：' + l.billingPeriod + ' 帳期請款單 ' + money(l.amount) + ' 元（請款單' + (BS[l.billStatus] || l.billStatus) + (l.billStatus === 'RECONCILED' ? '，已計入收回' : '，對帳完成後才計入收回') + '）')); });
           dt.appendChild(bx); dr.appendChild(dt); t.appendChild(dr);
         }
       });
@@ -3738,14 +3741,32 @@
         if (!chunks.length) { upBusy = false; $('upProgress').textContent = ''; renderUploads(); return; }
         var c = chunks.shift();
         $('upProgress').textContent = '檢查中…';
-        call('tax.checkBills', { files: c.map(function (u) { return { fileName: u.name, fileHash: u.hash, parsed: u.parse.bill }; }) }, function (d) {
+        call('tax.checkBills', { files: c.map(function (u) { return { fileName: u.name, fileHash: u.hash, parsed: u.parse.bill, advanceLinks: u.advLinks }; }) }, function (d) {
           d.results.forEach(function (r, k) { c[k].check = r; c[k].parse.warnings = c[k].parse.warnings || []; c[k].include = !upHard(c[k]) .length && r.status === 'OK'; });
-          next();
+          var again = c.filter(upInitLinks);   // 名稱含「代墊」且只有一筆未收回代墊 → 先猜（套用後重新檢查一次）
+          (function re() { if (!again.length) return next(); upRecheck(again.shift(), re); })();
         }, function (e) { c.forEach(function (u) { u.check = { status: 'PENDING', errors: [{ code: 'CHECK', message: e.message }], warnings: [], items: [] }; u.include = false; }); next(); });
       }
       next();
     });
   }
+
+  /** 補收代墊（M2 八之一）：系統先猜的項目套用到 u.advLinks；回傳 true＝有套用，需要重新檢查 */
+  function upInitLinks(u) {
+    var r = u.check; if (!r || !r.items || u.advLinks) return false;
+    var links = {}, n = 0;
+    r.items.forEach(function (i) { if (i.suggestAdvanceId) { links[i.seq] = i.suggestAdvanceId; n++; } });
+    if (!n) return false;
+    u.advLinks = links; return true;
+  }
+  /** 重新檢查單一份（業主改了補收代墊的選擇，類別、警示與金額驗證要跟著更新） */
+  function upRecheck(u, done) {
+    call('tax.checkBills', { files: [{ fileName: u.name, fileHash: u.hash, parsed: u.parse.bill, advanceLinks: u.advLinks }] }, function (d) {
+      u.check = d.results[0]; if (upHard(u).length) u.include = false;
+      if (done) done(); else renderUploads();
+    }, function (e) { alert(e.message); if (done) done(); else renderUploads(); });
+  }
+  function advOptionText(a) { return '補收代墊：' + (a.periodLabel || '') + ' ' + (ADV_TAX[a.taxType] || '') + ' 代墊 ' + fmtMoney(a.amount) + '（還剩 ' + fmtMoney(a.remaining) + '）'; }
 
   function fmtMoney(n) { return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
 
@@ -3788,8 +3809,25 @@
           ri.oninput = function () { u.reason = ri.value; updateUpButtons(); }; note.appendChild(ri);
         }
         if (c.items && c.items.length) {
-          var det = el('details', { style: 'margin-top:4px' }); det.appendChild(el('summary', { class: 'muted' }, '項目明細（' + c.items.length + ' 項）'));
-          c.items.forEach(function (i) { det.appendChild(el('div', { class: 'muted' }, i.label + '：' + fmtMoney(i.amount) + '　→ ' + i.categoryLabel + (i.periodKey ? '（' + i.periodKey + '）' : ''))); });
+          var hasAdv = !!(c.advances && c.advances.length) && u.state !== 'done';
+          var det = el('details', hasAdv ? { open: 'open', style: 'margin-top:4px' } : { style: 'margin-top:4px' }); det.appendChild(el('summary', { class: 'muted' }, '項目明細（' + c.items.length + ' 項）'));
+          if (hasAdv) det.appendChild(el('div', { class: 'alert', style: 'margin:4px 0' }, '這家客戶有 ' + c.advances.length + ' 筆未收回的代墊，請確認有沒有要併入這張請款單補收；要補收的項目在右邊選「補收代墊」。'));
+          c.items.forEach(function (i) {
+            var line = el('div', { class: 'muted', style: 'margin:2px 0' }, i.label + '：' + fmtMoney(i.amount) + '　→ ' + i.categoryLabel + (i.periodKey ? '（' + i.periodKey + '）' : ''));
+            if (hasAdv) {
+              var sel = el('select', { style: 'width:auto;max-width:100%;margin-left:6px' }); sel.disabled = upBusy;
+              sel.appendChild(el('option', { value: '' }, '一般項目'));
+              c.advances.forEach(function (a) { sel.appendChild(el('option', { value: a.advanceId }, advOptionText(a))); });
+              sel.value = (u.advLinks && u.advLinks[i.seq]) || '';
+              sel.onchange = function () {
+                var nl = {}; Object.keys(u.advLinks || {}).forEach(function (k) { nl[k] = u.advLinks[k]; });
+                if (sel.value) nl[i.seq] = sel.value; else delete nl[i.seq];
+                u.advLinks = nl; upRecheck(u);
+              };
+              line.appendChild(sel);
+            }
+            det.appendChild(line);
+          });
           if (c.storedName) det.appendChild(el('div', { class: 'muted' }, '存檔：' + c.folderName + ' ／ ' + c.storedName));
           note.appendChild(det);
         }
@@ -3817,7 +3855,7 @@
       var u = list[i++]; $('upProgress').textContent = '匯入 ' + i + '／' + list.length + '：' + u.name;
       var c = u.check, b = u.parse.bill, short = (c.folderName || '').slice(b.taxId.length + 1);
       call('tax.storeFile', { companyId: b.taxId, storedName: c.storedName, shortName: short, contentBase64: toBase64(u.buf) }, function (s) {
-        call('tax.importBill', { fileName: u.name, parsed: b, receipt: s.receipt, storedName: c.storedName, replace: !!u.replace, coexist: !!u.coexist, override: u.reason && upNeedReason(u) ? { reason: u.reason.trim() } : undefined }, function (r) {
+        call('tax.importBill', { fileName: u.name, parsed: b, receipt: s.receipt, storedName: c.storedName, advanceLinks: u.advLinks, replace: !!u.replace, coexist: !!u.coexist, override: u.reason && upNeedReason(u) ? { reason: u.reason.trim() } : undefined }, function (r) {
           u.state = 'done'; u.msg = '已匯入' + (r.linkedPeriods ? '，稅額已帶入 ' + r.linkedPeriods + ' 個期別的檢核列' : '') + (r.needsResend ? '（原單已發送，新單需重新發送）' : ''); u.include = false; ok++; renderUploads(); next();
         }, function (e) { u.state = 'failed'; u.msg = e.message + '（檔案已存入雲端硬碟，可重新檢查後再匯入，不會重複存檔）'; fail++; renderUploads(); next(); });
       }, function (e) { u.state = 'failed'; u.msg = e.message; fail++; renderUploads(); next(); });
