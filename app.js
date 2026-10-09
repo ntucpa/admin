@@ -1781,6 +1781,7 @@
         if (r.reports && r.reports.INVOICES_DONE) info.push('✓客戶已確認傳完發票 ' + r.reports.INVOICES_DONE.slice(5));
         if (r.reports && r.reports.NO_INVOICE) info.push('客戶回覆本期沒有發票 ' + r.reports.NO_INVOICE.slice(5));
         docLines(r).forEach(function (t) { info.push(t); });
+        if (r.advance && (r.advance.status === 'OPEN' || r.advance.status === 'PARTIAL')) info.push('先代墊 ' + money(r.advance.remaining) + ' 元未收回');
         left.appendChild(el('div', { class: 'muted', style: 'font-size:12px' }, info.join('　·　')));
         line.appendChild(left);
         var next = STAGE_NEXT_STEP[code];
@@ -2213,6 +2214,11 @@
     reg.onclick = function () { registerDialog(r, d); }; acts.appendChild(reg);
     var mg = el('button', { class: 'btn small secondary' }, '合併其他客戶'); mg.disabled = !d.canWrite; mg.style.marginRight = '10px'; mg.title = '一筆款同時付了好幾家客戶時，在這裡把款項分給／併入其他客戶'; mg.onclick = function () { mergeDialog(r, d); }; acts.appendChild(mg);
     box.appendChild(acts);
+    if (r.advanceOpen > 0) {
+      var av = el('div', { class: 'muted', style: 'margin-top:8px;color:#9a5b00' }, '這家客戶尚有未收回代墊 ' + money(r.advanceOpen) + ' 元（代墊不併入請款單金額）。');
+      var avb = el('button', { class: 'linkbtn', style: 'margin-left:6px' }, '看代墊帳'); avb.onclick = function () { advPreset = r.companyId; bankTab = 'advance'; showBankPage(); };
+      av.appendChild(avb); box.appendChild(av);
+    }
     return box;
   }
 
@@ -2328,18 +2334,173 @@
   function sha256Hex(text) { return crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)).then(hex); }
   function dateMs(dt) { return Date.parse(dt.slice(0, 10).replace(/\//g, '-') + 'T00:00:00'); }
 
+  /* ---------- 代墊帳（M2 第 5 步 5A，規格八之一）：在稅務申報頁公司視窗「標記先代墊」後建立；客戶層級的應收，不併入請款單金額 ---------- */
+  var ADV_STATUS = { OPEN: ['未收回', 'warn'], PARTIAL: ['部分收回', 'warn'], RECOVERED: ['已收回', 'ok'], WRITTEN_OFF: ['已沖銷', 'off'] };
+  var ADV_TAX = { VAT: '營業稅', PREPAY: '暫繳' };
+  var advState = null, advPreset = '';   // advState: { data, status, q, open }；advPreset：從客戶帳款表跳來時預填的搜尋字
+
+  function loadAdvances(status) {
+    var box = $('bankAdvanceView');
+    if (!advState) box.textContent = '載入中…';
+    var st = status || (advState ? advState.status : 'OPEN');
+    call('bank.getAdvances', { status: st }, function (d) {
+      advState = { data: d, status: st, q: advPreset || (advState ? advState.q : ''), open: advState ? advState.open : {} };
+      advPreset = '';
+      renderAdvances();
+    }, function (e) { box.textContent = e.message; });
+  }
+
+  function renderAdvances() {
+    var d = advState.data, box = $('bankAdvanceView'); box.innerHTML = '';
+    var bar = el('div', { class: 'toolbar' });
+    var fil = el('select', { style: 'width:auto' });
+    [['OPEN', '未收回與部分收回'], ['RECOVERED', '已收回'], ['WRITTEN_OFF', '已沖銷'], ['ALL', '全部']].forEach(function (o) { fil.appendChild(el('option', { value: o[0] }, o[1])); });
+    fil.value = advState.status; fil.onchange = function () { loadAdvances(fil.value); };
+    var q = el('input', { type: 'text', placeholder: '搜尋統編、簡稱' }); q.value = advState.q; q.oninput = function () { advState.q = q.value; paint(); };
+    var rf = el('button', { class: 'btn small secondary' }, '重新整理'); rf.onclick = function () { loadAdvances(advState.status); };
+    bar.appendChild(fil); bar.appendChild(q); bar.appendChild(rf); box.appendChild(bar);
+    if (!d.canWrite) box.appendChild(el('div', { class: 'alert' }, '唯讀模式：系統同步異常，暫時無法沖銷或取消標記。'));
+    box.appendChild(el('div', { class: 'muted', style: 'margin-bottom:6px' }, '代墊由您手動決定：到「稅務申報」點公司簡稱 → 標記先代墊。代墊帳是客戶層級的應收，不併入請款單金額。已代墊超過 ' + d.overdueDays + ' 天仍未收回會標「逾期」（天數由超級管理員在稅務模組設定修改）。金額單位：元。'));
+    var tbl = el('div'); box.appendChild(tbl);
+    function paint() {
+      tbl.innerHTML = '';
+      var key = advState.q.trim().toLowerCase();
+      var list = d.rows.filter(function (a) { return !key || (a.companyId + ' ' + a.name).toLowerCase().indexOf(key) >= 0; });
+      if (!list.length) { tbl.appendChild(el('div', { class: 'muted' }, d.rows.length ? '沒有符合的代墊。' : (advState.status === 'OPEN' ? '目前沒有未收回的代墊。' : '沒有資料。'))); return; }
+      var t = el('table', { class: 'ledger' }), h = el('tr');
+      ['統編', '簡稱', '帳期', '稅別', '代墊金額', '代墊日', '已幾天', '已收回', '還剩', '狀態', ''].forEach(function (x, i) { h.appendChild(el('th', [4, 6, 7, 8].indexOf(i) >= 0 ? { class: 'num' } : {}, x)); }); t.appendChild(h);
+      var tot = { amount: 0, recovered: 0, remaining: 0 };
+      list.forEach(function (a) {
+        var tr = el('tr'), s = ADV_STATUS[a.status] || [a.status, 'off'];
+        tot.amount += a.amount; tot.recovered += a.recovered; tot.remaining += a.remaining;
+        [a.companyId, a.name, a.periodLabel || '', ADV_TAX[a.taxType] || a.taxType, money(a.amount), a.advancedAt ? a.advancedAt.slice(5) : '', a.status === 'OPEN' || a.status === 'PARTIAL' ? String(a.days) : '', a.recovered ? money(a.recovered) : '', a.remaining ? money(a.remaining) : ''].forEach(function (x, i) {
+          tr.appendChild(el('td', [4, 6, 7, 8].indexOf(i) >= 0 ? { class: 'num' } : {}, x));
+        });
+        var sd = el('td'); sd.appendChild(badge(s[0], s[1])); if (a.overdue) sd.appendChild(badge('逾期', 'err')); tr.appendChild(sd);
+        var op = el('td'), ex = el('button', { class: 'linkbtn' }, advState.open[a.advanceId] ? '收合' : '展開');
+        ex.onclick = function () { advState.open[a.advanceId] = !advState.open[a.advanceId]; paint(); };
+        op.appendChild(ex);
+        if (a.canWriteOff) { var wo = el('button', { class: 'linkbtn', style: 'margin-left:8px' }, '沖銷'); wo.disabled = !d.canWrite; wo.onclick = function () { writeOffDialog(a); }; op.appendChild(wo); }
+        if (a.canCancel) { var cn = el('button', { class: 'linkbtn', style: 'margin-left:8px' }, '取消標記'); cn.disabled = !d.canWrite; cn.title = '標錯了才用；已有收回紀錄的要改用沖銷'; cn.onclick = function () { cancelAdvanceUi(a); }; op.appendChild(cn); }
+        tr.appendChild(op); t.appendChild(tr);
+        if (advState.open[a.advanceId]) {
+          var dr = el('tr'), dt = el('td', { colspan: '11', style: 'background:#f6f8fb' }), bx = el('div', { style: 'padding:6px 4px' });
+          bx.appendChild(el('div', {}, '標記人：' + (a.createdBy || '') + '　代墊日：' + a.advancedAt));
+          bx.appendChild(el('div', {}, '備註：' + (a.note || '（無）')));
+          bx.appendChild(el('div', {}, '收回來源：' + (a.recoveredBy || (a.recovered ? '' : '（尚未收回）'))));
+          dt.appendChild(bx); dr.appendChild(dt); t.appendChild(dr);
+        }
+      });
+      var fr = el('tr', { style: 'font-weight:600' });
+      fr.appendChild(el('td', { colspan: '4' }, '合計（' + list.length + ' 筆）'));
+      fr.appendChild(el('td', { class: 'num' }, money(tot.amount))); fr.appendChild(el('td', { colspan: '2' }, ''));
+      fr.appendChild(el('td', { class: 'num' }, tot.recovered ? money(tot.recovered) : '')); fr.appendChild(el('td', { class: 'num' }, tot.remaining ? money(tot.remaining) : '')); fr.appendChild(el('td', { colspan: '2' }, ''));
+      t.appendChild(fr);
+      var sc = el('div', { class: 'scrollx' }); sc.appendChild(t); tbl.appendChild(sc);
+    }
+    paint();
+  }
+
+  function writeOffDialog(a) {
+    var m = openModal('沖銷代墊');
+    m.appendChild(el('div', { class: 'muted' }, a.companyId + ' ' + a.name + '　' + (a.periodLabel || '') + ' ' + (ADV_TAX[a.taxType] || '') + '　代墊 ' + money(a.amount) + (a.recovered ? '，已收回 ' + money(a.recovered) : '') + '　→　還剩 ' + money(a.remaining) + ' 元'));
+    m.appendChild(el('p', {}, '沖銷＝決定不再收回這筆代墊（例如客戶結束營業、金額很小決定吸收）。沖銷後這筆不再算未收回、也不會再提醒逾期。'));
+    var note = el('input', { type: 'text', maxlength: '200', placeholder: '為什麼不再收回（必填）' });
+    field(m, '備註', note);
+    modalActions(m, '確定沖銷', function (fail) {
+      if (note.value.trim().length < 2) return fail('請填沖銷備註');
+      call('bank.writeOffAdvance', { advanceId: a.advanceId, note: note.value.trim() }, function () { closeModal(); loadAdvances(advState.status); }, function (e) { fail(e.message); });
+    });
+  }
+
+  function cancelAdvanceUi(a) {
+    if (!confirm('取消「' + a.name + ' ' + (a.periodLabel || '') + '」先代墊 ' + money(a.amount) + ' 元的標記？（標錯了才用；取消後可重新標記）')) return;
+    call('bank.cancelAdvance', { advanceId: a.advanceId }, function () { loadAdvances(advState.status); if (taxData && taxData.period) loadTax(taxData.period.periodId); }, function (e) { alert(e.message); });
+  }
+
+  /** 稅務申報頁公司視窗裡的「先代墊」區塊：已標記顯示狀態與取消標記；未標記顯示按鈕；其他期還有未收回的代墊先提醒 */
+  function advanceBlock(m, r) {
+    var canEdit = taxData.caps.canWrite;
+    m.appendChild(el('div', { class: 'card-title' }, '先代墊'));
+    var box = el('div', { style: 'margin-bottom:12px' });
+    var others = r.otherAdvances || [];
+    if (others.length) {
+      var sum = others.reduce(function (s, a) { return s + a.remaining; }, 0);
+      box.appendChild(el('div', { class: 'alert', style: 'margin-bottom:8px' }, '這家客戶還有 ' + others.length + ' 筆未收回的代墊，合計還剩 ' + money(sum) + ' 元（' + others.map(function (a) { return a.advancedAt.slice(5) + ' 代墊 ' + money(a.amount); }).join('、') + '）。再次代墊前請先確認；最後由您決定。'));
+    }
+    if (r.advance) {
+      var a = r.advance, s = ADV_STATUS[a.status] || [a.status, 'off'];
+      var line = el('div', { style: 'display:flex;gap:8px;align-items:center;flex-wrap:wrap' });
+      line.appendChild(el('span', {}, '本期已先代墊 ' + money(a.amount) + ' 元（代墊日 ' + a.advancedAt + (a.recovered ? '，已收回 ' + money(a.recovered) : '') + '）'));
+      line.appendChild(badge(s[0], s[1]));
+      if (a.status === 'OPEN' && !a.recovered) {
+        var cb = el('button', { class: 'btn small secondary' }, '取消標記'); cb.disabled = !canEdit; cb.title = '標錯了才用';
+        cb.onclick = function () {
+          if (!confirm('取消本期先代墊 ' + money(a.amount) + ' 元的標記？')) return;
+          call('bank.cancelAdvance', { advanceId: a.advanceId }, function () { closeModal(); loadTax(taxData.period.periodId); }, function (e) { alert(e.message); });
+        };
+        line.appendChild(cb);
+      }
+      box.appendChild(line);
+    } else {
+      var mb = el('button', { class: 'btn small' }, '標記先代墊'); mb.disabled = !canEdit || !r.applicable;
+      mb.onclick = function () { advanceMarkDialog(r); };
+      box.appendChild(mb);
+      box.appendChild(el('span', { class: 'muted', style: 'margin-left:8px' }, '客戶晚匯或少匯、您決定先替他繳稅時按（系統不會自動代墊；還沒對帳也可以標）。'));
+    }
+    m.appendChild(box);
+  }
+
+  function advanceMarkDialog(r) {
+    var m = openModal('標記先代墊：' + (r.shortName || r.companyName));
+    m.appendChild(el('div', { class: 'muted', style: 'margin-bottom:8px' }, r.companyId + '　' + taxData.period.label + '　稅額 ' + (r.taxAmount === null || r.taxAmount === undefined ? '（尚未計算）' : money(r.taxAmount) + ' 元')));
+    var others = r.otherAdvances || [];
+    if (others.length) m.appendChild(el('div', { class: 'alert', style: 'margin-bottom:8px' }, '提醒：這家客戶還有 ' + others.length + ' 筆未收回的代墊，合計還剩 ' + money(others.reduce(function (s, a) { return s + a.remaining; }, 0)) + ' 元。'));
+    var amt = el('input', { type: 'number', min: '1', style: 'width:160px' }); amt.value = r.taxAmount > 0 ? String(r.taxAmount) : '';
+    var dt = el('input', { type: 'date', style: 'width:auto' }); dt.value = todayStr();
+    var note = el('input', { type: 'text', maxlength: '200', placeholder: '選填' });
+    field(m, '代墊金額（元）', amt, '預設帶本期稅額，可修改。');
+    field(m, '代墊日', dt);
+    field(m, '備註', note);
+    modalActions(m, '標記', function (fail) {
+      var n = Number(amt.value);
+      if (!Number.isInteger(n) || n <= 0) return fail('代墊金額要填大於 0 的整數');
+      call('bank.markAdvance', { filingId: r.filingId, amount: n, advancedAt: dt.value || undefined, note: note.value.trim() }, function () { closeModal(); loadTax(taxData.period.periodId); }, function (e) { fail(e.message); });
+    });
+  }
+
+  /** 稅務模組設定頁（僅超管）：代墊逾期天數 */
+  function renderAdvanceSettings() {
+    var box = $('setAdvBox'); box.innerHTML = '';
+    call('bank.getAdvanceSettings', {}, function (r) {
+      var c = el('div', { class: 'card' }), s = { overdueDays: r.overdueDays };
+      c.appendChild(el('div', { class: 'card-title' }, '先代墊逾期天數'));
+      if (!r.canWrite) c.appendChild(el('div', { class: 'alert' }, '系統同步異常，目前只能查看，不能儲存。'));
+      var inp = el('input', { type: 'number', min: '1', max: '365', style: 'width:120px' }); inp.value = s.overdueDays; inp.oninput = function () { s.overdueDays = Number(inp.value); };
+      field(c, '代墊超過幾天還沒收回就標示逾期', inp, '預設 ' + r.defaultOverdueDays + ' 天；逾期的代墊會在「收款對帳 → 代墊帳」標紅色「逾期」。');
+      var save = el('button', { class: 'btn' }, '儲存'); save.disabled = !r.canWrite;
+      var out = el('span', { class: 'muted', style: 'margin-left:10px' });
+      save.onclick = function () {
+        save.disabled = true; out.textContent = '儲存中…';
+        call('bank.saveAdvanceSettings', s, function () { save.disabled = false; out.textContent = '已儲存'; }, function (e) { save.disabled = false; out.textContent = e.message; });
+      };
+      c.appendChild(save); c.appendChild(out); box.appendChild(c);
+    }, function (e) { box.textContent = e.message; });
+  }
+
   function showBankPage() {
     var hasBank = me && (me.role === 'SUPER_ADMIN' || (me.features || []).indexOf('BANK_RECONCILIATION') >= 0);
-    if (!hasBank) bankTab = 'ledger'; // 只有稅務申報權限者只看得到客戶帳款表
+    if (!hasBank && bankTab !== 'advance') bankTab = 'ledger'; // 只有稅務申報權限者只看得到客戶帳款表與代墊帳
     var tabs = $('bankTabs'); tabs.innerHTML = '';
-    (hasBank ? [['ledger', '客戶帳款表'], ['stmt', '匯入銀行明細'], ['alias', '客戶資料']] : [['ledger', '客戶帳款表']]).forEach(function (t) {
+    (hasBank ? [['ledger', '客戶帳款表'], ['advance', '代墊帳'], ['stmt', '匯入銀行明細'], ['alias', '客戶資料']] : [['ledger', '客戶帳款表'], ['advance', '代墊帳']]).forEach(function (t) {
       var b = el('button', { class: 'btn small' + (bankTab === t[0] ? '' : ' secondary') }, t[1]);
       b.onclick = function () { bankTab = t[0]; showBankPage(); }; tabs.appendChild(b);
     });
     $('bankStmtView').classList.toggle('hidden', bankTab !== 'stmt');
     $('bankLedgerView').classList.toggle('hidden', bankTab !== 'ledger');
     $('bankAliasView').classList.toggle('hidden', bankTab !== 'alias');
-    if (bankTab === 'alias') loadBank(); else if (bankTab === 'ledger') loadLedger(); else if (bs && bs.rows) reloadCtx(); else renderStmtStart();
+    $('bankAdvanceView').classList.toggle('hidden', bankTab !== 'advance');
+    if (bankTab === 'alias') loadBank(); else if (bankTab === 'advance') loadAdvances(); else if (bankTab === 'ledger') loadLedger(); else if (bs && bs.rows) reloadCtx(); else renderStmtStart();
   }
   var bankTab = 'ledger';
 
@@ -3226,12 +3387,13 @@
       cb.onchange = function () { if (cb.checked) taxSel[r.filingId] = 1; else delete taxSel[r.filingId]; updateTaxBatch(); };
       c0.appendChild(cb); tr.appendChild(c0);
       tr.appendChild(el('td', {}, r.companyId));
-      var nm = el('td', { title: r.companyName }), nl = el('button', { class: 'linkbtn', style: 'text-decoration:none;color:inherit', title: '點一下查看或編輯備註' }, r.shortName || r.companyName);
+      var nm = el('td', { title: r.companyName }), nl = el('button', { class: 'linkbtn', style: 'text-decoration:none;color:inherit', title: '點一下查看客戶本期資料（備註、先代墊）' }, r.shortName || r.companyName);
       nl.onclick = function () { notesDialog(r); }; nm.appendChild(nl);
       if (r.invoices && r.invoices.newCount > 0) { var mb = el('button', { class: 'badge warn', style: 'margin-left:6px;border:0;cursor:pointer', title: '客戶又傳了檔案，按一下標示已看過' }, '又收到 ' + r.invoices.newCount + ' 份 ' + r.invoices.newLastAt.slice(5, 10)); mb.onclick = function () { markSeen(['F:' + r.filingId]); }; nm.appendChild(mb); }
       if (r.reports && r.reports.INVOICES_DONE) nm.appendChild(el('span', { class: 'badge ok', style: 'margin-left:6px', title: '客戶在 LINE 按了「我已傳完發票」' }, '✓客戶已確認傳完 ' + r.reports.INVOICES_DONE.slice(5)));
       if (r.reports && r.reports.NO_INVOICE) nm.appendChild(el('span', { class: 'badge warn', style: 'margin-left:6px', title: '客戶在 LINE 按了「本期沒有發票」' }, '客戶回覆本期沒有發票 ' + r.reports.NO_INVOICE.slice(5)));
       if (r.docs && (r.docs.filed || r.docs.paid)) { var dl = docLines(r), dif = (r.docs.filed && r.docs.filed.differs) || (r.docs.paid && r.docs.paid.differs); nm.appendChild(el('span', { class: 'badge ' + (dif ? 'warn' : 'ok'), style: 'margin-left:6px', title: dl.join('\n') }, dif ? '📄日期不同' : '📄已讀取')); }
+      if (r.advance && (r.advance.status === 'OPEN' || r.advance.status === 'PARTIAL')) { var ab = el('span', { class: 'badge warn', style: 'margin-left:6px', title: '代墊日 ' + r.advance.advancedAt + (r.advance.recovered ? '，已收回 ' + money(r.advance.recovered) : '') }, '先代墊 ' + money(r.advance.remaining) + (r.advance.status === 'PARTIAL' ? '（部分收回）' : '（未收回）')); nm.appendChild(ab); }
       if (r.note || r.taxNotes || r.bookkeepingNotes) { var ni = el('button', { class: 'linkbtn', style: 'text-decoration:none;margin-left:4px', title: [r.note, r.taxNotes, r.bookkeepingNotes].filter(Boolean).join('\n') }, 'ⓘ'); ni.onclick = function () { notesDialog(r); }; nm.appendChild(ni); }
       tr.appendChild(nm);
       var last = lastStep(r, d.steps);
@@ -3343,9 +3505,10 @@
 
   /** 備註與注意事項：唯讀顯示申報／帳務注意事項，本期備註可直接編輯 */
   function notesDialog(r) {
-    var m = openModal((r.shortName || r.companyName) + '　備註與注意事項');
+    var m = openModal((r.shortName || r.companyName) + '　客戶本期資料');
     m.appendChild(el('div', { class: 'card-title' }, '申報注意事項')); m.appendChild(el('div', { style: 'white-space:pre-wrap;margin-bottom:12px' }, r.taxNotes || '（無）'));
     m.appendChild(el('div', { class: 'card-title' }, '帳務注意事項')); m.appendChild(el('div', { style: 'white-space:pre-wrap;margin-bottom:12px' }, r.bookkeepingNotes || '（無）'));
+    advanceBlock(m, r);
     var inp = el('input', { type: 'text', maxlength: '300' }); inp.value = r.note || '';
     var canEdit = taxData.period.status === 'OPEN' && taxData.caps.canWrite; inp.disabled = !canEdit;
     field(m, '本期備註', inp);
@@ -3673,7 +3836,7 @@
   var setData = null;
   function loadTaxSettings() {
     $('setBox').textContent = '載入中…';
-    call('tax.getSettings', {}, function (d) { setData = JSON.parse(JSON.stringify(d)); renderTaxSettings(); renderNoticeSettings(); renderDocSettings(); }, function (e) { $('setBox').textContent = e.message; });
+    call('tax.getSettings', {}, function (d) { setData = JSON.parse(JSON.stringify(d)); renderTaxSettings(); renderNoticeSettings(); renderDocSettings(); renderAdvanceSettings(); }, function (e) { $('setBox').textContent = e.message; });
   }
   function renderTaxSettings() {
     var d = setData, box = $('setBox'); box.innerHTML = '';
