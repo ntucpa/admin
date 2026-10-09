@@ -2565,13 +2565,14 @@
   function buildRows() {
     var ctx = bs.ctx, set = ctx.settings, handled = {};
     ctx.handled.forEach(function (h) { handled[h] = 1; });
+    var priorMarks = {}; (ctx.marks || []).forEach(function (m) { priorMarks[m.key + '#' + m.seq] = m.mark; });
     var prev = {}; (bs.rows || []).forEach(function (r) { prev[r.tx.key + '#' + r.tx.seq] = r; });
     bs.beforeN = bs.txns.filter(function (tx) { return !inScopeTx(tx); }).length;
     var rows = bs.txns.filter(inScopeTx).map(function (tx) {
       var p = window.YcBank.parseMemo(tx.summary, tx.memo);
       var kind = window.YcBank.classify(tx, { keywords: set.nonCustomerKeywords, categories: catKinds(set.taxPayCategories) });
       var old = prev[tx.key + '#' + tx.seq];
-      return { tx: tx, p: p, kind: kind, done: !!handled[tx.key + '#' + tx.seq], mark: old && old.mark && !handled[tx.key + '#' + tx.seq] ? old.mark : '', manual: old && old.manual ? old.manual : null, learn: old ? old.learn : true, ticked: old && old.touched ? old.ticked : null, touched: !!(old && old.touched), match: null };
+      return { tx: tx, p: p, kind: kind, priorMark: priorMarks[tx.key + '#' + tx.seq] || '', done: !!handled[tx.key + '#' + tx.seq], mark: old && old.mark && !handled[tx.key + '#' + tx.seq] ? old.mark : '', manual: old && old.manual ? old.manual : null, learn: old ? old.learn : true, ticked: old && old.touched ? old.ticked : null, touched: !!(old && old.touched), match: null };
     });
     var cust = rows.filter(function (r) { return r.kind === 'CUSTOMER_PAYMENT' && !r.done && !r.mark; });
     var matchTxns = cust.filter(function (r) { return !r.manual; }).map(function (r, i) { r.mid = 'c' + i; return { id: r.mid, amount: r.tx.amount, date: dateMs(r.tx.dt), payerAccount: r.p.payerAccount, payerName: r.p.payerName || r.p.freeText, payerTag: r.p.payerTag }; });
@@ -2642,6 +2643,7 @@
     box.appendChild(tabs);
     var list = rows.filter(function (r) { return tabOf(r) === bs.tab; });
     var card = el('div', { class: 'card' }); box.appendChild(card);
+    if (bs.tab === 'done') card.appendChild(el('div', { class: 'muted', style: 'margin-bottom:6px' }, '以前標記過「略過」或「非客戶」的交易，可按「恢復成待處理」讓它重新出現。雲端不存交易內容，所以要先載入那份明細才看得到。已確認收款的交易要撤銷，請用頁面下方「近期已確認」的取消確認。'));
     if (!list.length) card.appendChild(el('div', { class: 'muted' }, bs.tab === 'exact' ? '沒有完全相符的項目。' : '這一類沒有項目。'));
     else {
       var t = el('table', { class: 'auto' }), h = el('tr');
@@ -2680,7 +2682,7 @@
         rs.appendChild(line);
       });
       rs.appendChild(el('div', { class: 'muted' }, RULE_LABEL[r.match.rule] || r.match.rule));
-    } else if (r.kind === 'CUSTOMER_PAYMENT') rs.appendChild(el('span', { class: 'muted' }, r.done ? '先前已處理' : (r.mark ? (r.mark === 'IGNORED' ? '已標記略過（尚未送出）' : '已標記非客戶款項（尚未送出）') : '對不到')));
+    } else if (r.kind === 'CUSTOMER_PAYMENT') rs.appendChild(el('span', { class: 'muted' }, r.done ? (r.priorMark === 'IGNORED' ? '先前標記：略過' : (r.priorMark === 'NON_CUSTOMER' ? '先前標記：非客戶款項' : '已確認收款（要撤銷請用下方「近期已確認」的取消確認）')) : (r.mark ? (r.mark === 'IGNORED' ? '已標記略過（尚未送出）' : '已標記非客戶款項（尚未送出）') : '對不到')));
     else if (r.kind === 'TAX_PAYMENT') {
       var m = r.match;
       if (m.allocations.length) rs.appendChild(document.createTextNode(companyName(m.allocations[0].companyId) + '　' + m.note + ' 應納稅額 ' + money(m.allocations[0].allocated)));
@@ -2695,6 +2697,15 @@
         var ig = el('button', { class: 'linkbtn' }, '略過'); ig.onclick = function () { r.mark = 'IGNORED'; renderStmt(); }; op.appendChild(ig);
         var nc = el('button', { class: 'linkbtn' }, '非客戶'); nc.onclick = function () { r.mark = 'NON_CUSTOMER'; renderStmt(); }; op.appendChild(nc);
       } else { var un = el('button', { class: 'linkbtn' }, '還原'); un.onclick = function () { r.mark = ''; renderStmt(); }; op.appendChild(un); }
+    }
+    if (r.done && r.priorMark) {
+      var rc = el('button', { class: 'linkbtn' }, '恢復成待處理'); rc.title = '清除「' + (r.priorMark === 'IGNORED' ? '略過' : '非客戶') + '」標記，這筆交易會重新出現在「未對上」或「建議」';
+      rc.onclick = function () {
+        if (!confirm('恢復後，這筆交易會重新出現在「未對上」或「建議」，不影響任何請款單。確定嗎？')) return;
+        rc.disabled = true;
+        call('bank.clearMarks', { items: [{ txnKey: r.tx.key, txnSeq: r.tx.seq }] }, function () { reloadCtx(); }, function (e) { rc.disabled = false; alert(e.message); });
+      };
+      op.appendChild(rc);
     }
     tr.appendChild(op);
     return tr;
