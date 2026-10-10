@@ -149,5 +149,56 @@
     return { period: m[1], taxId: id };
   }
 
-  return { parseBill: parseBill, parseFileName: parseFileName, pageLines: pageLines };
+  /**
+   * 營業稅繳款書（國稅局列印，401／403）：統編、所屬期別、繳納期限、應納稅額。位置不重要，靠標籤文字樣式；同一張繳款書會印三聯，金額出現多次，
+   * 另有一行條碼文字（例如 4011R0000072825＝代號 401＋稅額 72825），兩者要一致才採用。
+   * @returns {{ ok:boolean, code?:string, message?:string, slip?:Object, warnings:string[] }}
+   * slip: { taxId, form:'401'|'403', periodKey:'VAT-115-07', periodLabel:'115 年 07～08 月', dueDate:'2026-09-15', amount, taxRegNo }
+   */
+  function parseSlip(pages) {
+    var warnings = [], strs = [];
+    (pages || []).forEach(function (p) { (p.items || []).forEach(function (i) { if (i.str && String(i.str).trim()) strs.push(squeeze(i.str)); }); });
+    if (!strs.length) return { ok: false, code: 'NO_TEXT', message: '讀不到文字（可能是掃描圖檔，不是電子 PDF）', warnings: warnings };
+    var whole = strs.join('\n');
+    if (whole.indexOf('營業稅繳款書') < 0) return { ok: false, code: 'NOT_VAT_SLIP', message: '不是營業稅繳款書（暫繳、營所稅等其他繳款書目前不處理）', warnings: warnings };
+    var fm = /\((40[13])/.exec(whole);
+    if (!fm) return { ok: false, code: 'NO_FORM', message: '讀不到申報書種類（401／403）', warnings: warnings };
+    var tm = /統一編號[：:](\d{8})/.exec(whole);
+    if (!tm) return { ok: false, code: 'NO_TAXID', message: '讀不到統一編號', warnings: warnings };
+    var pm = /所屬年月份[：:]?(\d{2,3})年(\d{1,2})[～~\-－](\d{1,2})月/.exec(whole);
+    if (!pm || Number(pm[3]) !== Number(pm[2]) + 1) return { ok: false, code: 'NO_PERIOD', message: '讀不到所屬年月份（或不是雙月期別）', warnings: warnings };
+    var dm = /繳納期限[：:]?(\d{2,3})年(\d{1,2})月(\d{1,2})日/.exec(whole);
+    if (!dm) return { ok: false, code: 'NO_DUE', message: '讀不到繳納期限', warnings: warnings };
+    // 金額：條碼文字（代號＋稅額）與印出的金額互相核對
+    var barcode = null;
+    strs.forEach(function (t) { var m = /^(40[13])\d[A-Z](\d{10,11})$/.exec(t); if (m && barcode === null) barcode = parseInt(m[2], 10); });
+    var count = {}, best = null;
+    strs.forEach(function (t) { if (/^\d{1,3}(,\d{3})*$/.test(t)) count[t] = (count[t] || 0) + 1; });
+    Object.keys(count).forEach(function (k) { if (count[k] >= 2 && (!best || count[k] > count[best])) best = k; });
+    var printed = best === null ? null : toInt(best);
+    var amount = barcode !== null ? barcode : printed;
+    if (amount === null) return { ok: false, code: 'NO_AMOUNT', message: '讀不到應納稅額', warnings: warnings };
+    if (barcode !== null && printed !== null && barcode !== printed) return { ok: false, code: 'AMOUNT_MISMATCH', message: '繳款書上印的稅額（' + printed + '）與條碼（' + barcode + '）不一致，請重新列印', warnings: warnings };
+    if (barcode === null) warnings.push('沒有讀到條碼文字，稅額只依印出的金額（請抽查）');
+    var rm = /稅籍編號[：:]([A-Z0-9]{6,12})/.exec(whole);
+    var year = Number(pm[1]);
+    var pad = function (n) { return (n < 10 ? '0' : '') + n; };
+    return {
+      ok: true, warnings: warnings,
+      slip: {
+        taxId: tm[1], form: fm[1], periodKey: 'VAT-' + year + '-' + pad(Number(pm[2])), periodLabel: year + ' 年 ' + pad(Number(pm[2])) + '～' + pad(Number(pm[3])) + ' 月',
+        dueDate: (Number(dm[1]) + 1911) + '-' + pad(Number(dm[2])) + '-' + pad(Number(dm[3])), amount: amount, taxRegNo: rm ? rm[1] : ''
+      }
+    };
+  }
+
+  /** 讀到的文字是哪一種文件：請款明細表 → { kind:'BILL', ... parseBill 的結果 }；營業稅繳款書 → { kind:'SLIP', ... parseSlip 的結果 }；其他照 parseBill 回報 */
+  function parseDoc(pages) {
+    var text = '';
+    (pages || []).forEach(function (p) { (p.items || []).forEach(function (i) { text += squeeze(i.str || ''); }); });
+    if (text.indexOf('請款明細表') < 0 && text.indexOf('繳款書') >= 0) { var r = parseSlip(pages); r.kind = 'SLIP'; return r; }
+    var b = parseBill(pages); b.kind = 'BILL'; return b;
+  }
+
+  return { parseBill: parseBill, parseSlip: parseSlip, parseDoc: parseDoc, parseFileName: parseFileName, pageLines: pageLines };
 });

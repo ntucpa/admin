@@ -97,7 +97,7 @@
   }
 
   /** 只讀取、不寫入的動作：遇到 Google 連線錯誤時可安全地自動重試 */
-  var READ_ONLY = { ping: 1, loginUrl: 1, getHome: 1, getSettings: 1, listCompanies: 1, getUnclassifiedFolder: 1, listAdmins: 1, checkEmail: 1, listBindings: 1, listCustomers: 1, customerHistory: 1, listInvites: 1, listUnclassified: 1, listExceptions: 1, takeoverReport: 1, listAudit: 1, driveAudit: 1, previewCompanyImport: 1, listIntake: 1, listBackups: 1, 'tax.getBoard': 1, 'tax.getHome': 1, 'bank.listAliases': 1, 'bank.bootstrapPreview': 1, 'bank.getContext': 1, 'bank.listRecent': 1, 'bank.suggestAliases': 1, 'bank.getLedger': 1, 'tax.getNoticeList': 1, 'tax.getRecipients': 1, 'tax.getNoticeSettings': 1, 'tax.getDocSettings': 1, 'tax.mediaStatus': 1, 'ai.getSettings': 1, 'tax.memoSummary': 1, 'tax.listProfiles': 1, 'tax.checkBills': 1, 'tax.getSettings': 1, 'tax.testClassify': 1, 'tax.billsStatus': 1 };
+  var READ_ONLY = { ping: 1, loginUrl: 1, getHome: 1, getSettings: 1, listCompanies: 1, getUnclassifiedFolder: 1, listAdmins: 1, checkEmail: 1, listBindings: 1, listCustomers: 1, customerHistory: 1, listInvites: 1, listUnclassified: 1, listExceptions: 1, takeoverReport: 1, listAudit: 1, driveAudit: 1, previewCompanyImport: 1, listIntake: 1, listBackups: 1, 'tax.getBoard': 1, 'tax.getHome': 1, 'bank.listAliases': 1, 'bank.bootstrapPreview': 1, 'bank.getContext': 1, 'bank.listRecent': 1, 'bank.suggestAliases': 1, 'bank.getLedger': 1, 'tax.getNoticeList': 1, 'tax.getRecipients': 1, 'tax.getNoticeSettings': 1, 'tax.getDocSettings': 1, 'tax.slipStatus': 1, 'tax.mediaStatus': 1, 'ai.getSettings': 1, 'tax.memoSummary': 1, 'tax.listProfiles': 1, 'tax.checkBills': 1, 'tax.getSettings': 1, 'tax.testClassify': 1, 'tax.billsStatus': 1 };
   var NET_ERR = 'Google 連線暫時不穩，請稍後再試一次。若是儲存或新增，請先重新整理頁面確認是否已完成，避免重複操作。';
 
   /** timeoutMs>0：等太久就放棄（讀取類動作由 api() 馬上重試）。Apps Script 窗口實測約每 4 次有 1 次要等 10～30 秒才失敗，與其乾等不如快速放棄重來 */
@@ -4028,7 +4028,7 @@
               });
             });
           })(n);
-          return p.then(function () { return { hash: hash, buf: buf, parse: window.YcBillParser.parseBill(pages) }; });
+          return p.then(function () { return { hash: hash, buf: buf, parse: window.YcBillParser.parseDoc(pages) }; });
         });
       });
     });
@@ -4052,12 +4052,18 @@
     if (s.enabled && !s.hasReceiptKey) box.appendChild(el('div', { class: 'alert' }, '尚未設定「檔案收據金鑰」（Apps Script 指令碼屬性 BILL_RECEIPT_KEY），暫時無法匯入。請聯絡維護人員。'));
   }
 
-  function upHard(u) { return (u.check.errors || []).filter(function (e) { return !e.overridable && e.code !== 'B5'; }); }
+  function isSlip(u) { return !!(u.parse && u.parse.kind === 'SLIP'); }
+  function upHasCode(u, code) { return (u.check.errors || []).some(function (e) { return e.code === code; }); }
+  function upHard(u) {
+    if (isSlip(u)) return (u.check.errors || []).filter(function (e) { return e.code !== 'S5' && e.code !== 'S6'; }); // S5 已有繳款書（可取代）、S6 代繳客戶（可勾本期改自繳）
+    return (u.check.errors || []).filter(function (e) { return !e.overridable && e.code !== 'B5'; });
+  }
   function upNeedReplace(u) { return (u.check.errors || []).some(function (e) { return e.code === 'B5'; }); }
   function upNeedReason(u) { return (u.check.errors || []).some(function (e) { return e.overridable; }); }
   function upReady(u) {
     if (!u.check || u.state === 'done') return false;
     if (upHard(u).length) return false;
+    if (isSlip(u)) return (!upHasCode(u, 'S5') || !!u.replace) && (!upHasCode(u, 'S6') || !!u.forceSelf);
     if (upNeedReplace(u) && !u.replace && !u.coexist) return false;
     if (upNeedReason(u) && (u.reason || '').trim().length < 2) return false;
     return true;
@@ -4083,13 +4089,16 @@
     p.then(function () {
       var okOnes = added.filter(function (u) { return u.parse.ok; });
       added.filter(function (u) { return !u.parse.ok; }).forEach(function (u) { u.check = { status: 'PENDING', errors: [{ code: 'PARSE', message: u.parse.message }], warnings: [], items: [] }; u.include = false; });
-      var chunks = []; for (var i = 0; i < okOnes.length; i += 40) chunks.push(okOnes.slice(i, i + 40));
+      var chunks = [];
+      [okOnes.filter(function (u) { return !isSlip(u); }), okOnes.filter(isSlip)].forEach(function (grp) { for (var i = 0; i < grp.length; i += 40) chunks.push(grp.slice(i, i + 40)); });
       function next() {
         if (!chunks.length) { upBusy = false; $('upProgress').textContent = ''; renderUploads(); return; }
         var c = chunks.shift();
         $('upProgress').textContent = '檢查中…';
-        call('tax.checkBills', { files: c.map(function (u) { return { fileName: u.name, fileHash: u.hash, parsed: u.parse.bill, advanceLinks: u.advLinks }; }) }, function (d) {
+        var isSl = isSlip(c[0]);
+        call(isSl ? 'tax.checkSlips' : 'tax.checkBills', { files: c.map(function (u) { return isSl ? { fileName: u.name, fileHash: u.hash, slip: u.parse.slip } : { fileName: u.name, fileHash: u.hash, parsed: u.parse.bill, advanceLinks: u.advLinks }; }) }, function (d) {
           d.results.forEach(function (r, k) { c[k].check = r; c[k].parse.warnings = c[k].parse.warnings || []; c[k].include = !upHard(c[k]) .length && r.status === 'OK'; });
+          if (isSl) return next();
           var again = c.filter(upInitLinks);   // 名稱含「代墊」且只有一筆未收回代墊 → 先猜（套用後重新檢查一次）
           (function re() { if (!again.length) return next(); upRecheck(again.shift(), re); })();
         }, function (e) { c.forEach(function (u) { u.check = { status: 'PENDING', errors: [{ code: 'CHECK', message: e.message }], warnings: [], items: [] }; u.include = false; }); next(); });
@@ -4119,17 +4128,17 @@
 
   function renderUploads() {
     var box = $('upBox'); box.innerHTML = '';
-    if (!ups.length) { box.appendChild(el('div', { class: 'muted' }, '把請款明細表 PDF 拖到上方，或按「選擇檔案」。可一次選多個；讀取在您的瀏覽器內進行，確認後才會存檔與寫入。')); updateUpButtons(); return; }
+    if (!ups.length) { box.appendChild(el('div', { class: 'muted' }, '把請款明細表 PDF（也可以一起放國稅局的營業稅繳款書）拖到上方，或按「選擇檔案」。可一次選多個；讀取在您的瀏覽器內進行，確認後才會存檔與寫入。')); updateUpButtons(); return; }
     var t = el('table'), cg = el('colgroup'); ['34px', '', '120px', '70px', '80px', '110px', ''].forEach(function (w) { cg.appendChild(el('col', w ? { style: 'width:' + w } : {})); }); t.appendChild(cg);
     var h = el('tr'); ['', '檔案', '公司', '帳期', '合計', '結果', '說明／處理'].forEach(function (x) { h.appendChild(el('th', {}, x)); }); t.appendChild(h);
     ups.forEach(function (u) {
-      var c = u.check, b = u.parse.ok ? u.parse.bill : null, tr = el('tr');
+      var c = u.check, sl = u.parse.ok && isSlip(u) ? u.parse.slip : null, b = u.parse.ok && !sl ? u.parse.bill : null, tr = el('tr');
       var c0 = el('td'), cb = el('input', { type: 'checkbox' }); cb.checked = !!u.include && u.state !== 'done'; cb.disabled = !c || !!upHard(u).length || u.state === 'done' || upBusy;
       cb.onchange = function () { u.include = cb.checked; updateUpButtons(); }; c0.appendChild(cb); tr.appendChild(c0);
       tr.appendChild(el('td', { title: u.name }, u.name.length > 28 ? u.name.slice(0, 27) + '…' : u.name));
-      tr.appendChild(el('td', {}, c && c.companyName ? c.companyName : (b ? b.taxId : '—')));
-      tr.appendChild(el('td', {}, b ? b.billingPeriod : '—'));
-      tr.appendChild(el('td', {}, b ? fmtMoney(b.total) : '—'));
+      tr.appendChild(el('td', {}, c && c.companyName ? c.companyName : (b ? b.taxId : (sl ? sl.taxId : '—'))));
+      tr.appendChild(el('td', {}, b ? b.billingPeriod : (sl ? sl.periodLabel + '（繳款書）' : '—')));
+      tr.appendChild(el('td', {}, b ? fmtMoney(b.total) : (sl ? fmtMoney(sl.amount) : '—')));
       var st = el('td');
       if (u.state === 'done') st.appendChild(badge('已匯入', 'ok'));
       else if (u.state === 'failed') st.appendChild(badge('匯入失敗', 'err'));
@@ -4139,7 +4148,23 @@
       tr.appendChild(st);
       var note = el('td');
       if (u.msg) note.appendChild(el('div', { class: u.state === 'done' ? 'msg ok' : 'msg err' }, u.msg));
-      if (c) {
+      if (c && sl) {
+        note.appendChild(el('div', { class: 'muted' }, '營業稅繳款書（' + sl.form + '）　繳納期限 ' + sl.dueDate + (c.selfPay ? '' : '')));
+        (c.errors || []).filter(function (e) { return e.code !== 'S5' && e.code !== 'S6'; }).forEach(function (e) { note.appendChild(el('div', { class: 'msg err' }, '✖ ' + e.message)); });
+        (c.warnings || []).concat(u.parse.warnings || []).forEach(function (w) { note.appendChild(el('div', { class: 'muted' }, '⚠ ' + w)); });
+        if (u.state !== 'done' && !upHard(u).length) {
+          if (upHasCode(u, 'S5')) {
+            var l5 = el('label', { style: 'display:block;margin-top:4px' }), c5 = el('input', { type: 'checkbox' }); c5.checked = !!u.replace;
+            c5.onchange = function () { u.replace = c5.checked; if (u.replace) u.include = true; updateUpButtons(); };
+            l5.appendChild(c5); l5.appendChild(document.createTextNode(' 取代原有繳款書（' + (c.errors.filter(function (e) { return e.code === 'S5'; })[0].message.replace(/，要取代請勾選「取代」$/, '') ) + '）')); note.appendChild(l5);
+          }
+          if (upHasCode(u, 'S6')) {
+            var l6 = el('label', { style: 'display:block;margin-top:4px' }), c6 = el('input', { type: 'checkbox' }); c6.checked = !!u.forceSelf;
+            c6.onchange = function () { u.forceSelf = c6.checked; if (u.forceSelf) u.include = true; updateUpButtons(); };
+            l6.appendChild(c6); l6.appendChild(document.createTextNode(' 本期改自繳（這家客戶平常設為「代繳」，勾選後這一期改成客戶自己繳稅）')); note.appendChild(l6);
+          }
+        }
+      } else if (c) {
         if (c.kind && c.kind !== 'GENERAL') note.appendChild(el('div', { class: 'muted' }, '請款類別：' + ({ PREPAY: '暫繳', CIT: '營所稅', PIT: '綜所稅', UNDIST: '未分配盈餘稅' }[c.kind] || c.kind) + '（與營業稅請款單分開，各自期限與對帳）'));
         (c.errors || []).forEach(function (e) { note.appendChild(el('div', { class: 'msg err' }, '✖ ' + e.message)); });
         (c.warnings || []).concat(u.parse.warnings || []).forEach(function (w) { note.appendChild(el('div', { class: 'muted' }, '⚠ ' + w)); });
@@ -4194,14 +4219,21 @@
   function runImport() {
     var list = ups.filter(function (u) { return u.include && upReady(u); });
     if (!list.length) return;
-    if (!confirm('確定匯入 ' + list.length + ' 份請款單？PDF 會存入雲端硬碟「客戶請款單」資料夾。')) return;
+    var nSlip = list.filter(isSlip).length;
+    if (!confirm('確定匯入 ' + (list.length - nSlip ? (list.length - nSlip) + ' 份請款單' : '') + (list.length - nSlip && nSlip ? '、' : '') + (nSlip ? nSlip + ' 份營業稅繳款書' : '') + '？PDF 會存入雲端硬碟「客戶請款單」資料夾。')) return;
     upBusy = true; updateUpButtons();
     var ok = 0, fail = 0, i = 0;
     (function next() {
       if (i >= list.length) { upBusy = false; $('upProgress').textContent = '完成：成功 ' + ok + ' 份，失敗 ' + fail + ' 份。'; renderUploads(); return; }
       var u = list[i++]; $('upProgress').textContent = '匯入 ' + i + '／' + list.length + '：' + u.name;
-      var c = u.check, b = u.parse.bill, short = (c.folderName || '').slice(b.taxId.length + 1);
-      call('tax.storeFile', { companyId: b.taxId, storedName: c.storedName, shortName: short, contentBase64: toBase64(u.buf) }, function (s) {
+      var c = u.check, sl = isSlip(u) ? u.parse.slip : null, b = sl ? { taxId: sl.taxId } : u.parse.bill, short = (c.folderName || '').slice(b.taxId.length + 1), b64 = toBase64(u.buf);
+      call('tax.storeFile', { companyId: b.taxId, storedName: c.storedName, shortName: short, contentBase64: b64 }, function (s) {
+        if (sl) {
+          call('tax.importSlip', { fileName: u.name, slip: sl, receipt: s.receipt, storedName: c.storedName, contentBase64: b64, replace: !!u.replace, forceSelf: !!u.forceSelf }, function (r) {
+            u.state = 'done'; u.msg = '已匯入繳款書（稅額 ' + fmtMoney(r.amount) + '，繳納期限 ' + r.dueDate + '）' + (r.madeSelfPay ? '，這一期已改為自繳' : '') + (r.copied ? '' : '（檔案較大，只存雲端硬碟，客戶查看時會稍慢）'); u.include = false; ok++; renderUploads(); next();
+          }, function (e) { u.state = 'failed'; u.msg = e.message + '（檔案已存入雲端硬碟，可重新檢查後再匯入，不會重複存檔）'; fail++; renderUploads(); next(); });
+          return;
+        }
         call('tax.importBill', { fileName: u.name, parsed: b, receipt: s.receipt, storedName: c.storedName, advanceLinks: u.advLinks, replace: !!u.replace, coexist: !!u.coexist, override: u.reason && upNeedReason(u) ? { reason: u.reason.trim() } : undefined }, function (r) {
           u.state = 'done'; u.msg = '已匯入' + (r.linkedPeriods ? '，稅額已帶入 ' + r.linkedPeriods + ' 個期別的檢核列' : '') + (r.needsResend ? '（原單已發送，新單需重新發送）' : ''); u.include = false; ok++; renderUploads(); next();
         }, function (e) { u.state = 'failed'; u.msg = e.message + '（檔案已存入雲端硬碟，可重新檢查後再匯入，不會重複存檔）'; fail++; renderUploads(); next(); });
@@ -4215,7 +4247,17 @@
     $('upClearBtn').onclick = function () { ups = []; $('upProgress').textContent = ''; renderUploads(); };
     $('upBackBtn').onclick = function () { go('tax'); };
   })();
-  function loadUploadPage() { ups = ups.filter(function (u) { return u.state !== 'done'; }); loadBillsStatus(); renderUploads(); }
+  function loadSlipStatus() {
+    var box = $('upSlipBox'); if (!box) return; box.innerHTML = '';
+    call('tax.slipStatus', {}, function (d) {
+      if (!d.period || !d.selfPayCount) return;
+      var ok = !d.missing.length;
+      var c = el('div', { class: ok ? 'muted' : 'alert', style: 'margin:8px 0' });
+      c.appendChild(document.createTextNode(d.period.label + '：自繳客戶 ' + d.selfPayCount + ' 家，已上傳繳款書 ' + d.uploaded + ' 家' + (ok ? '。' : '，還沒上傳：' + d.missing.map(function (x) { return x.name; }).join('、') + '。（發請款通知前請先上傳，否則客戶看不到繳款書。）')));
+      box.appendChild(c);
+    }, function () { /* 狀態讀不到不影響上傳 */ });
+  }
+  function loadUploadPage() { ups = ups.filter(function (u) { return u.state !== 'done'; }); loadBillsStatus(); loadSlipStatus(); renderUploads(); }
 
   /* ---------- 模組設定（僅超級管理員）：檔名範本、請款項目類別、分類規則 ---------- */
   var setData = null;
