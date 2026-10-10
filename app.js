@@ -2065,6 +2065,7 @@
         if (r.invoices && r.invoices.newCount > 0) info.push('又收到 ' + r.invoices.newCount + ' 份（最近 ' + r.invoices.newLastAt.slice(5, 10) + '）');
         if (r.reports && r.reports.INVOICES_DONE) info.push('✓客戶已確認傳完發票 ' + r.reports.INVOICES_DONE.slice(5));
         if (r.reports && r.reports.NO_INVOICE) info.push('客戶回覆本期沒有發票 ' + r.reports.NO_INVOICE.slice(5));
+        if (r.reports && r.reports.TAX_PAID) info.push('✓客戶回報已繳稅 ' + r.reports.TAX_PAID.slice(5));
         docLines(r).forEach(function (t) { info.push(t); });
         if (r.advance && (r.advance.status === 'OPEN' || r.advance.status === 'PARTIAL')) info.push('先代墊 ' + money(r.advance.remaining) + ' 元未收回');
         left.appendChild(el('div', { class: 'muted', style: 'font-size:12px' }, info.join('　·　')));
@@ -2197,6 +2198,8 @@
       top.appendChild(cb); top.appendChild(el('strong', { style: 'min-width:90px' }, r.name)); top.appendChild(el('span', { class: 'muted' }, r.companyId));
       top.appendChild(amtSpan);
       if (r.amountChanged) top.appendChild(el('span', { class: 'badge warn' }, '金額已變動：原 ' + r.amountChanged.from + '→' + r.amountChanged.to));
+      if (r.slip) top.appendChild(el('span', { class: 'badge ok', title: '自繳客戶：這則通知會附營業稅繳款書（稅額與繳納期限）和〔查看繳款書〕〔我已繳稅〕按鈕' }, '含營業稅繳款書 ' + money(r.slip.amount) + ' 元（繳納期限 ' + r.slip.dueDate.slice(5) + '）'));
+      if (r.selfNoSlip) top.appendChild(el('span', { class: 'badge warn', title: '這家客戶是自繳，但這一期還沒上傳營業稅繳款書；現在發出去的通知不會有稅款段落和查看繳款書按鈕。請先到「上傳請款單」上傳繳款書' }, '⚠自繳客戶尚未上傳繳款書'));
       if (r.anomaly) top.appendChild(el('span', { class: 'badge err' }, r.anomaly));
       var who = el('span', { class: 'badge off' });
       function paintWho() {
@@ -3455,7 +3458,8 @@
       field(c, '匯款帳號說明（放進請款通知；留空則不顯示）', bn);
       var ph = r.placeholders.map(function (x) { return '{' + x + '}'; }).join(' ');
       [['tplNotice1', '第一次通知訊息（手動複製版）'], ['tplNotice2', '第二次通知訊息（手動複製版）'], ['tplBill', '請款通知訊息（手動複製版）'], ['tplDun', '催款訊息（手動複製版）'],
-       ['tplLineNotice1', '第一次通知訊息（LINE 版，訊息下方有按鈕）'], ['tplLineNotice2', '第二次通知訊息（LINE 版）'], ['tplLineBill', '請款通知訊息（LINE 版）'], ['tplLineDun', '催款訊息（LINE 版）']].forEach(function (t) {
+       ['tplLineNotice1', '第一次通知訊息（LINE 版，訊息下方有按鈕）'], ['tplLineNotice2', '第二次通知訊息（LINE 版）'], ['tplLineBill', '請款通知訊息（LINE 版）'], ['tplLineDun', '催款訊息（LINE 版）'],
+       ['tplBillSelf', '請款通知訊息：自繳客戶（手動複製版；已上傳繳款書的客戶用這則，可用 {稅額}、{繳稅期限}）'], ['tplLineBillSelf', '請款通知訊息：自繳客戶（LINE 版；訊息下方有〔查看繳款書〕〔我已匯款〕〔我已繳稅〕）']].forEach(function (t) {
         var ta = el('textarea', { rows: '6', style: 'width:100%' }); ta.value = s[t[0]]; ta.oninput = function () { s[t[0]] = ta.value; };
         var reset = el('button', { class: 'linkbtn' }, '還原預設'); reset.onclick = function () { s[t[0]] = r.defaults[t[0]]; ta.value = s[t[0]]; };
         field(c, t[1], ta, '可用欄位：' + ph); c.lastChild.appendChild(reset);
@@ -3735,6 +3739,7 @@
       nl.onclick = function () { notesDialog(r); }; nm.appendChild(nl);
       if (r.invoices && r.invoices.newCount > 0) { var mb = el('button', { class: 'badge warn', style: 'margin-left:6px;border:0;cursor:pointer', title: '客戶又傳了檔案，按一下標示已看過' }, '又收到 ' + r.invoices.newCount + ' 份 ' + r.invoices.newLastAt.slice(5, 10)); mb.onclick = function () { markSeen(['F:' + r.filingId]); }; nm.appendChild(mb); }
       if (r.reports && r.reports.INVOICES_DONE) nm.appendChild(el('span', { class: 'badge ok', style: 'margin-left:6px', title: '客戶在 LINE 按了「我已傳完發票」' }, '✓客戶已確認傳完 ' + r.reports.INVOICES_DONE.slice(5)));
+      if (r.reports && r.reports.TAX_PAID) nm.appendChild(el('span', { class: 'badge ok', style: 'margin-left:6px', title: '自繳客戶在 LINE 按了「我已繳稅」（只是客戶回報，繳稅日期以繳稅回執為準）' }, '✓客戶回報已繳稅 ' + r.reports.TAX_PAID.slice(5)));
       if (r.reports && r.reports.NO_INVOICE) nm.appendChild(el('span', { class: 'badge warn', style: 'margin-left:6px', title: '客戶在 LINE 按了「本期沒有發票」' }, '客戶回覆本期沒有發票 ' + r.reports.NO_INVOICE.slice(5)));
       if (r.docs && (r.docs.filed || r.docs.paid || (r.docs.messages && r.docs.messages.length))) {
         var dl = docLines(r), dif = (r.docs.filed && r.docs.filed.differs) || (r.docs.paid && r.docs.paid.differs), cf = r.docs.messages && r.docs.messages.length;
