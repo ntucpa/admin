@@ -3522,8 +3522,8 @@
       c.appendChild(el('div', { class: 'card-title' }, 'AI 設定'));
       if (!r.canWrite) c.appendChild(el('div', { class: 'alert' }, '系統同步異常，目前只能查看，不能儲存。'));
       c.appendChild(el('div', { class: r.keySet ? 'muted' : 'alert', style: 'margin-bottom:10px' },
-        r.keySet ? 'Gemini 金鑰：已設定（全系統共用一把）。每種用途可以各自開關、各自選模型（可以選不同價位的模型來省錢）。開啟的用途才會把文件送到 Gemini。'
-                 : 'Gemini 金鑰：尚未設定，所有用途即使打開開關也不會送出任何文件。金鑰要由維護人員在 Cloudflare 以 wrangler secret put GEMINI_API_KEY 放入（不會經過這個網頁）。'));
+        r.keySet ? 'Gemini 金鑰：已設定（全系統共用一把，放在 AI 服務 yc-ai）。每種用途可以各自開關、各自選模型（可以選不同價位的模型來省錢）。開啟的用途才會把文件送到 Gemini。'
+                 : 'Gemini 金鑰：尚未設定（或 AI 服務 yc-ai 連不上），所有用途即使打開開關也不會送出任何文件。金鑰只放在 Cloudflare 的 yc-ai，由維護人員貼上（不會經過這個網頁）。'));
       var t = el('table'), hd = el('tr');
       ['用途', '開啟', '模型名稱'].forEach(function (x) { hd.appendChild(el('th', {}, x)); }); t.appendChild(hd);
       r.purposes.forEach(function (p) {
