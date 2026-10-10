@@ -346,12 +346,23 @@
     }
   }
 
+  /** 開啟發票辨識：先同步開好新分頁（避免被瀏覽器擋），換到短效通行證後再導過去；通行證放在網址 # 後面，不會被伺服器紀錄 */
+  function openInvoiceApp(base, hashExtra) {
+    var w = window.open('about:blank', '_blank');
+    if (w) { try { w.opener = null; } catch (e) { /* 略過 */ } }
+    ensureJwt().then(function (j) {
+      if (!j) { if (w) w.close(); alert('無法取得通行證，請重新整理後台頁面再試一次'); return; }
+      var target = String(base).replace(/\/+$/, '') + '/enter#t=' + encodeURIComponent(j) + (hashExtra || '');
+      if (w) w.location.href = target; else window.location.href = target;
+    });
+  }
+
   function go(page) {
-    // 發票辨識：開公司電腦上的入口頁（另開分頁）；還沒設定網址時顯示說明
+    // 發票辨識：換一張短效通行證，另開分頁進入 Cloudflare 上的發票辨識（伺服器驗過通行證才送出頁面）；還沒設定網址時顯示說明
     if (page === 'invoiceai') {
       var url = (window.YC_CONFIG || {}).INVOICE_AI_URL;
-      if (url) { window.open(url, '_blank', 'noopener'); return; }
-      showDevPage('發票辨識', '發票辨識的入口頁將放在公司電腦（進項、銷項等多支辨識程式從這裡進入），只有在公司網路或遠端連線時打得開。入口頁設定好後，點這裡會直接開啟。');
+      if (url) { openInvoiceApp(url, ''); return; }
+      showDevPage('發票辨識', '發票辨識的入口頁設定好後，點這裡會直接開啟（需從後台登入，不需要另外輸入密碼）。');
     }
     if (DEV_PAGES[page]) showDevPage(DEV_PAGES[page].title, DEV_PAGES[page].text);
     var section = (page === 'invoiceai' || DEV_PAGES[page]) ? 'dev' : page;
