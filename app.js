@@ -97,7 +97,7 @@
   }
 
   /** 只讀取、不寫入的動作：遇到 Google 連線錯誤時可安全地自動重試 */
-  var READ_ONLY = { ping: 1, loginUrl: 1, getHome: 1, getSettings: 1, listCompanies: 1, getUnclassifiedFolder: 1, listAdmins: 1, checkEmail: 1, listBindings: 1, listCustomers: 1, customerHistory: 1, listInvites: 1, listUnclassified: 1, listExceptions: 1, takeoverReport: 1, listAudit: 1, driveAudit: 1, previewCompanyImport: 1, listIntake: 1, listBackups: 1, 'tax.getBoard': 1, 'tax.getHome': 1, 'bank.listAliases': 1, 'bank.bootstrapPreview': 1, 'bank.getContext': 1, 'bank.listRecent': 1, 'bank.suggestAliases': 1, 'bank.getLedger': 1, 'tax.getNoticeList': 1, 'tax.getRecipients': 1, 'tax.getNoticeSettings': 1, 'tax.getDocSettings': 1, 'ai.getSettings': 1, 'tax.memoSummary': 1, 'tax.listProfiles': 1, 'tax.checkBills': 1, 'tax.getSettings': 1, 'tax.testClassify': 1, 'tax.billsStatus': 1 };
+  var READ_ONLY = { ping: 1, loginUrl: 1, getHome: 1, getSettings: 1, listCompanies: 1, getUnclassifiedFolder: 1, listAdmins: 1, checkEmail: 1, listBindings: 1, listCustomers: 1, customerHistory: 1, listInvites: 1, listUnclassified: 1, listExceptions: 1, takeoverReport: 1, listAudit: 1, driveAudit: 1, previewCompanyImport: 1, listIntake: 1, listBackups: 1, 'tax.getBoard': 1, 'tax.getHome': 1, 'bank.listAliases': 1, 'bank.bootstrapPreview': 1, 'bank.getContext': 1, 'bank.listRecent': 1, 'bank.suggestAliases': 1, 'bank.getLedger': 1, 'tax.getNoticeList': 1, 'tax.getRecipients': 1, 'tax.getNoticeSettings': 1, 'tax.getDocSettings': 1, 'tax.mediaStatus': 1, 'ai.getSettings': 1, 'tax.memoSummary': 1, 'tax.listProfiles': 1, 'tax.checkBills': 1, 'tax.getSettings': 1, 'tax.testClassify': 1, 'tax.billsStatus': 1 };
   var NET_ERR = 'Google 連線暫時不穩，請稍後再試一次。若是儲存或新增，請先重新整理頁面確認是否已完成，避免重複操作。';
 
   /** timeoutMs>0：等太久就放棄（讀取類動作由 api() 馬上重試）。Apps Script 窗口實測約每 4 次有 1 次要等 10～30 秒才失敗，與其乾等不如快速放棄重來 */
@@ -3463,12 +3463,35 @@
   function renderDocSettings() {
     var box = $('setDocBox'); box.innerHTML = '';
     call('tax.getDocSettings', {}, function (r) {
-      var c = el('div', { class: 'card' }), s = { startPeriod: r.startPeriod };
+      var c = el('div', { class: 'card' }), s = { startPeriod: r.startPeriod, mediaPrimary: r.mediaPrimary };
       c.appendChild(el('div', { class: 'card-title' }, '申報書與繳稅回執自動讀取'));
       if (!r.canWrite) c.appendChild(el('div', { class: 'alert' }, '系統同步異常，目前只能查看，不能儲存。'));
       c.appendChild(el('div', { class: 'muted', style: 'margin-bottom:8px' }, '系統會自動讀取客戶資料夾裡「營業稅申報書」與「繳稅證明／營業稅」的 PDF，填入申報日與繳稅日（人工填過的不會被蓋掉）。程式讀不出來的文件要不要請 AI 讀，到「系統設定 → AI 設定」開關。'));
       var sp = el('input', { type: 'text', style: 'width:160px' }); sp.value = s.startPeriod; sp.oninput = function () { s.startPeriod = sp.value.trim(); };
       field(c, '起始期別（早於這一期的文件完全不讀、不寫）', sp, '格式例如 VAT-115-09＝115 年 9–10 月；預設 ' + r.defaultStart + '。');
+      var mpSw = el('input', { type: 'checkbox' }); mpSw.checked = !!s.mediaPrimary; mpSw.onchange = function () { s.mediaPrimary = mpSw.checked; };
+      var mpl = el('label', { style: 'display:flex;gap:8px;align-items:center;margin:10px 0 4px' }); mpl.appendChild(mpSw);
+      mpl.appendChild(el('span', {}, '以報稅軟體的「申報完成檔（.b64）」為主，申報書 PDF 為備援（預設關閉；關閉時只讀申報書 PDF）'));
+      c.appendChild(mpl);
+      c.appendChild(el('div', { class: 'muted', style: 'margin:0 0 8px 26px' }, '開啟後：兩份都在且一致才自動填申報日；只有一份先填並提示另一份尚未上傳；兩份不一致不自動填，會指出哪一份是舊的。系統自己填的日期遇到較新的申報資料（例如重新申報）會自動更新，您手動填過的日期不會動。檔案由歸檔小工具的「雙擊執行_申報媒體檔」上傳。'));
+      var mbox = el('div', { style: 'margin:0 0 10px 26px' }); c.appendChild(mbox);
+      call('tax.mediaStatus', {}, function (m) {
+        mbox.innerHTML = '';
+        if (!m.enabled) {
+          mbox.appendChild(el('div', { class: 'alert' }, '申報媒體檔的雲端資料夾尚未啟用。啟用後會在雲端硬碟「客戶資料」的同一層建立「營業稅申報媒體檔」資料夾（不分享給任何客戶）。'));
+          if (r.canWrite) {
+            var en = el('button', { class: 'btn small' }, '啟用申報媒體檔資料夾');
+            en.onclick = function () { if (!confirm('要在雲端硬碟建立「營業稅申報媒體檔」資料夾嗎？（與「客戶請款單」同一層，不分享給任何客戶）')) return; en.disabled = true; call('tax.mediaSetup', {}, function () { renderDocSettings(); }, function (e) { en.disabled = false; alert(e.message); }); };
+            mbox.appendChild(en);
+          }
+          return;
+        }
+        mbox.appendChild(el('div', { class: 'muted' }, '雲端資料夾：「' + m.folderName + '」（已啟用，結構：期別／401表媒體檔、上傳媒體檔）'));
+        var rs = el('button', { class: 'btn small secondary', style: 'margin-top:6px' }, '重新讀取申報媒體檔'), rout = el('span', { class: 'muted', style: 'margin-left:8px' });
+        rs.title = '平常上傳時系統會即時讀取；萬一漏掉（例如手動放進雲端資料夾），按這裡把沒讀過的補送給系統。一次最多 20 個，可重複按。';
+        rs.onclick = function () { rs.disabled = true; rout.textContent = '讀取中…'; call('tax.mediaResync', {}, function (x) { rs.disabled = false; rout.textContent = '檢查 ' + x.checked + ' 個檔案，這次補送 ' + x.pushed + ' 個' + (x.remaining ? '，還有 ' + x.remaining + ' 個沒送，請再按一次' : '，全部完成'); }, function (e) { rs.disabled = false; rout.textContent = e.message; }); };
+        mbox.appendChild(rs); mbox.appendChild(rout);
+      }, function (e) { mbox.textContent = e.message; });
       var save = el('button', { class: 'btn' }, '儲存'); save.disabled = !r.canWrite;
       var out = el('span', { class: 'muted', style: 'margin-left:10px' });
       save.onclick = function () {
@@ -3702,7 +3725,10 @@
       if (r.invoices && r.invoices.newCount > 0) { var mb = el('button', { class: 'badge warn', style: 'margin-left:6px;border:0;cursor:pointer', title: '客戶又傳了檔案，按一下標示已看過' }, '又收到 ' + r.invoices.newCount + ' 份 ' + r.invoices.newLastAt.slice(5, 10)); mb.onclick = function () { markSeen(['F:' + r.filingId]); }; nm.appendChild(mb); }
       if (r.reports && r.reports.INVOICES_DONE) nm.appendChild(el('span', { class: 'badge ok', style: 'margin-left:6px', title: '客戶在 LINE 按了「我已傳完發票」' }, '✓客戶已確認傳完 ' + r.reports.INVOICES_DONE.slice(5)));
       if (r.reports && r.reports.NO_INVOICE) nm.appendChild(el('span', { class: 'badge warn', style: 'margin-left:6px', title: '客戶在 LINE 按了「本期沒有發票」' }, '客戶回覆本期沒有發票 ' + r.reports.NO_INVOICE.slice(5)));
-      if (r.docs && (r.docs.filed || r.docs.paid)) { var dl = docLines(r), dif = (r.docs.filed && r.docs.filed.differs) || (r.docs.paid && r.docs.paid.differs); nm.appendChild(el('span', { class: 'badge ' + (dif ? 'warn' : 'ok'), style: 'margin-left:6px', title: dl.join('\n') }, dif ? '📄日期不同' : '📄已讀取')); }
+      if (r.docs && (r.docs.filed || r.docs.paid || (r.docs.messages && r.docs.messages.length))) {
+        var dl = docLines(r), dif = (r.docs.filed && r.docs.filed.differs) || (r.docs.paid && r.docs.paid.differs), cf = r.docs.messages && r.docs.messages.length;
+        nm.appendChild(el('span', { class: 'badge ' + (cf || dif || r.docs.pdfMissing ? 'warn' : 'ok'), style: 'margin-left:6px', title: dl.join('\n') }, cf ? '⚠申報資料待確認' : (dif ? '📄日期不同' : (r.docs.pdfMissing ? '📄PDF尚未上傳' : '📄已讀取'))));
+      }
       if (r.advance && (r.advance.status === 'OPEN' || r.advance.status === 'PARTIAL')) { var ab = el('span', { class: 'badge warn', style: 'margin-left:6px', title: '代墊日 ' + r.advance.advancedAt + (r.advance.recovered ? '，已收回 ' + money(r.advance.recovered) : '') }, '先代墊 ' + money(r.advance.remaining) + (r.advance.status === 'PARTIAL' ? '（部分收回）' : '（未收回）')); nm.appendChild(ab); }
       if (r.note || r.taxNotes || r.bookkeepingNotes) { var ni = el('button', { class: 'linkbtn', style: 'text-decoration:none;margin-left:4px', title: [r.note, r.taxNotes, r.bookkeepingNotes].filter(Boolean).join('\n') }, 'ⓘ'); ni.onclick = function () { notesDialog(r); }; nm.appendChild(ni); }
       tr.appendChild(nm);
@@ -3738,8 +3764,11 @@
     var out = [], d = r.docs; if (!d) return out;
     function md(x) { return x ? x.slice(5).replace('-', '/') : ''; }
     function money(n) { return n === null || n === undefined ? '' : Number(n).toLocaleString('en-US'); }
-    if (d.filed) out.push('申報書' + (d.filed.ai ? '（AI 讀取）' : '') + '：' + md(d.filed.date) + ' 申報' + (d.filed.taxDue !== null ? '，應實繳 ' + money(d.filed.taxDue) : '') + (d.filed.count > 1 ? '（第 ' + d.filed.count + ' 次申報）' : '') + (d.filed.differs ? '　⚠與目前登記的 ' + md(d.filed.registered) + ' 不同' : ''));
+    if (d.filed) out.push((d.filed.source === 'MEDIA' ? '申報完成檔' : '申報書') + (d.filed.ai ? '（AI 讀取）' : '') + '：' + md(d.filed.date) + ' 申報' + (d.filed.taxDue !== null ? '，應實繳 ' + money(d.filed.taxDue) : '') + (d.filed.count > 1 ? '（第 ' + d.filed.count + ' 次申報）' : '') + (d.filed.differs ? '　⚠與目前登記的 ' + md(d.filed.registered) + ' 不同' : ''));
     if (d.paid) out.push('繳稅回執' + (d.paid.ai ? '（AI 讀取）' : '') + '：' + md(d.paid.date) + ' 繳款 ' + money(d.paid.amount) + (d.paid.differs ? '　⚠與目前登記的 ' + md(d.paid.registered) + ' 不同' : ''));
+    if (d.pdfMissing) out.push('⚠申報書 PDF 尚未上傳（目前依申報完成檔）');
+    if (d.mediaMissing) out.push('申報完成檔尚未上傳（目前依申報書 PDF）');
+    (d.messages || []).forEach(function (t) { out.push('⚠' + t); });
     return out;
   }
 
@@ -3836,7 +3865,7 @@
     var dt = el('input', { type: 'date' }); dt.value = s.date || todayStr(); field(m, '日期', dt);
     var docPart = r.docs && (code === 'FILED' ? r.docs.filed : code === 'TAX_PAID' ? r.docs.paid : null);
     if (docPart && docPart.date) {
-      var dbox = el('div', { class: docPart.differs ? 'alert' : 'muted', style: 'margin:6px 0' }, (code === 'FILED' ? '申報書' : '繳稅回執') + '上的日期是 ' + docPart.date + (docPart.differs ? '，與目前登記的不同（系統不會自動改人工填的日期）。' : '。'));
+      var dbox = el('div', { class: docPart.differs ? 'alert' : 'muted', style: 'margin:6px 0' }, (code === 'FILED' ? (docPart.source === 'MEDIA' ? '申報完成檔' : '申報書') : '繳稅回執') + '上的日期是 ' + docPart.date + (docPart.differs ? '，與目前登記的不同（系統不會自動改人工填的日期）。' : '。'));
       if (docPart.differs) { var useDoc = el('button', { class: 'linkbtn', style: 'margin-left:8px' }, '改成文件上的日期'); useDoc.onclick = function () { dt.value = docPart.date; }; dbox.appendChild(useDoc); }
       m.appendChild(dbox);
     }
